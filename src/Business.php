@@ -26,17 +26,17 @@ declare(strict_types=1);
 
 namespace localzet\Cluster;
 
-/** localzet WebCore */
+/** localzet Server */
 
-use localzet\Server\Timer;
+use localzet\Timer;
 use localzet\Server;
 use localzet\Server\Connection\TcpConnection;
 use localzet\Server\Connection\AsyncTcpConnection;
 
-/** RootX MultiCore */
+/** RootX Cluster */
 
 use localzet\Cluster\Lib\Context;
-use localzet\Cluster\Protocols\Federation;
+use localzet\Cluster\Protocols\Cluster;
 
 /**
  *
@@ -211,7 +211,12 @@ class Business extends Server
         }
 
         if (!class_exists('\Protocols\Federation')) {
-            class_alias('localzet\Cluster\Protocols\Federation', 'Protocols\Federation');
+            class_alias('localzet\Cluster\Protocols\Cluster', 'Protocols\Federation');
+        }
+
+        // Backward compatibility alias
+        if (!class_exists('localzet\Cluster\BusinessServer')) {
+            class_alias(Business::class, 'localzet\Cluster\BusinessServer');
         }
 
         if (!is_array($this->registerAddress)) {
@@ -352,7 +357,7 @@ class Business extends Server
     public function onGatewayMessage($connection, $data)
     {
         $cmd = $data['cmd'];
-        if ($cmd === Federation::CMD_PING) {
+        if ($cmd === Cluster::CMD_PING) {
             return;
         }
         // 上下文数据
@@ -375,7 +380,7 @@ class Business extends Server
             'GATEWAY_CLIENT_ID' => Context::$client_id,
         );
         // 检查session版本，如果是过期的session数据则拉取最新的数据
-        if ($cmd !== Federation::CMD_ON_CLOSE && isset($this->_sessionVersion[Context::$client_id]) && $this->_sessionVersion[Context::$client_id] !== crc32($data['ext_data'])) {
+        if ($cmd !== Cluster::CMD_ON_CLOSE && isset($this->_sessionVersion[Context::$client_id]) && $this->_sessionVersion[Context::$client_id] !== crc32($data['ext_data'])) {
             $_SESSION = Context::$old_session = \localzet\Cluster\Lib\Gateway::getSession(Context::$client_id);
             $this->_sessionVersion[Context::$client_id] = crc32($data['ext_data']);
         } else {
@@ -392,23 +397,23 @@ class Business extends Server
 
         // 尝试执行 Event::onConnection、Event::onMessage、Event::onClose
         switch ($cmd) {
-            case Federation::CMD_ON_CONNECT:
+            case Cluster::CMD_ON_CONNECT:
                 if ($this->_eventOnConnect) {
                     call_user_func($this->_eventOnConnect, Context::$client_id);
                 }
                 break;
-            case Federation::CMD_ON_MESSAGE:
+            case Cluster::CMD_ON_MESSAGE:
                 if ($this->_eventOnMessage) {
                     call_user_func($this->_eventOnMessage, Context::$client_id, $data['body']);
                 }
                 break;
-            case Federation::CMD_ON_CLOSE:
+            case Cluster::CMD_ON_CLOSE:
                 unset($this->_sessionVersion[Context::$client_id]);
                 if ($this->_eventOnClose) {
                     call_user_func($this->_eventOnClose, Context::$client_id);
                 }
                 break;
-            case Federation::CMD_ON_WEBSOCKET_CONNECT:
+            case Cluster::CMD_ON_WEBSOCKET_CONNECT:
                 if ($this->_eventOnWebSocketConnect) {
                     call_user_func($this->_eventOnWebSocketConnect, Context::$client_id, $data['body']);
                 }
@@ -421,7 +426,7 @@ class Business extends Server
         }
 
         // 判断 session 是否被更改
-        if ($_SESSION !== Context::$old_session && $cmd !== Federation::CMD_ON_CLOSE) {
+        if ($_SESSION !== Context::$old_session && $cmd !== Cluster::CMD_ON_CLOSE) {
             $session_str_now = $_SESSION !== null ? Context::sessionEncode($_SESSION) : '';
             \localzet\Cluster\Lib\Gateway::setSocketSession(Context::$client_id, $session_str_now);
             $this->_sessionVersion[Context::$client_id] = crc32($session_str_now);
@@ -464,8 +469,8 @@ class Business extends Server
             if (TcpConnection::$defaultMaxSendBufferSize == $gateway_connection->maxSendBufferSize) {
                 $gateway_connection->maxSendBufferSize = 50 * 1024 * 1024;
             }
-            $gateway_data         = Federation::$empty;
-            $gateway_data['cmd']  = Federation::CMD_SERVER_CONNECT;
+            $gateway_data         = Cluster::$empty;
+            $gateway_data['cmd']  = Cluster::CMD_SERVER_CONNECT;
             $gateway_data['body'] = json_encode(array(
                 'server_key' => "{$this->name}:{$this->id}",
                 'secret_key' => $this->secretKey,

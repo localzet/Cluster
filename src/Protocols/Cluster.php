@@ -25,9 +25,9 @@
 namespace localzet\Cluster\Protocols;
 
 /**
- * Двоичный протокол между MultiCore и WebCore
+ * Двоичный протокол между Cluster и Server
  *
- * struct Federation
+ * struct NCNnNnNCnN
  * {
  *     unsigned int                 pack_len,
  *     unsigned char                cmd,
@@ -44,34 +44,34 @@ namespace localzet\Cluster\Protocols;
  * }
  * NCNnNnNCnN
  */
-class Federation
+class Cluster
 {
-    /** Для WebCore: Новое соединение */
+    /** Для Server: Новое соединение */
     const CMD_ON_CONNECT = 1;
 
-    /** Для WebCore: Новое событие */
+    /** Для Server: Новое событие */
     const CMD_ON_MESSAGE = 3;
 
-    /** Для WebCore: Закрытие соединения */
+    /** Для Server: Закрытие соединения */
     const CMD_ON_CLOSE = 4;
 
-    /** Для MultiCore: Отправить данные одному */
+    /** Для Cluster: Отправить данные одному */
     const CMD_SEND_TO_ONE = 5;
 
-    /** Для MultiCore: Отправить данные всем */
+    /** Для Cluster: Отправить данные всем */
     const CMD_SEND_TO_ALL = 6;
 
     /**
-     * Для MultiCore:
+     * Для Cluster:
      *  1. Если есть событие, подключение будет закрыто сразу после отправки
      *  2. Если нет событий, соедиение будет немедленно закрыто.
      */
     const CMD_KICK = 7;
 
-    /** Для MultiCore: Немедленно закрыть соединение */
+    /** Для Cluster: Немедленно закрыть соединение */
     const CMD_DESTROY = 8;
 
-    /** Для MultiCore: Отправить данные и обновить сессию */
+    /** Для Cluster: Отправить данные и обновить сессию */
     const CMD_UPDATE_SESSION = 9;
 
     /** Получить сессии */
@@ -116,13 +116,13 @@ class Federation
     /** Отменить пакет */
     const CMD_UNGROUP = 27;
 
-    /** Соединение MultiCore и WebCore */
+    /** Соединение Cluster и Server */
     const CMD_SERVER_CONNECT = 200;
 
     /** Сердцебиение */
     const CMD_PING = 201;
 
-    /** Подключение MultiCore Client */
+    /** Подключение Cluster Client */
     const CMD_GATEWAY_CLIENT_CONNECT = 202;
 
     /** Получить сессию по client_id */

@@ -1,7 +1,7 @@
 <?php
 
 /**
- * @package     MultiCore FrameX Plugin
+ * @package     Cluster FrameX Plugin
  * @link        https://localzet.gitbook.io
  * @author      localzet <creator@localzet.ru>
  * @copyright   Copyright (c) 2018-2022 RootX Group

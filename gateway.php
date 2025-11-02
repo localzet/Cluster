@@ -1,13 +1,11 @@
 <?php
 
-use \GatewayWorker\Gateway;
-use \localzet\Server\Autoloader;
 use localzet\Server;
-use localzet\Cluster\Server as MultiCore;
+use localzet\Cluster\Gateway;
 
 require_once __DIR__ . '/vendor/autoload.php';
 
-$gateway = new MultiCore("Websocket://0.0.0.0:7273");
+$gateway = new Gateway("Websocket://0.0.0.0:7273");
 
 $gateway->name = 'ChatGateway';
 
@@ -21,7 +19,7 @@ $gateway->pingInterval = 10;
 
 $gateway->pingData = '{"type":"ping"}';
 
-$gateway->registerAddress = '127.0.0.1:800';
+$gateway->registerAddress = '127.0.0.1:1236';
 
 // 当客户端连接上来时，设置连接的onWebSocketConnect，即在websocket握手时的回调
 $gateway->onConnect = function ($connection) {

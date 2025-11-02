@@ -27,7 +27,7 @@ declare(strict_types=1);
 namespace localzet\Cluster\Lib;
 
 use Exception;
-use localzet\Cluster\Protocols\Federation;
+use localzet\Cluster\Protocols\Cluster;
 use localzet\Server\Connection\TcpConnection;
 
 /**
@@ -91,11 +91,11 @@ class Gateway
      */
     public static function sendToAll($message, $client_id_array = null, $exclude_client_id = null, $raw = false)
     {
-        $gateway_data         = Federation::$empty;
-        $gateway_data['cmd']  = Federation::CMD_SEND_TO_ALL;
+        $gateway_data         = Cluster::$empty;
+        $gateway_data['cmd']  = Cluster::CMD_SEND_TO_ALL;
         $gateway_data['body'] = $message;
         if ($raw) {
-            $gateway_data['flag'] |= Federation::FLAG_NOT_CALL_ENCODE;
+            $gateway_data['flag'] |= Cluster::FLAG_NOT_CALL_ENCODE;
         }
 
         if ($exclude_client_id) {
@@ -168,7 +168,7 @@ class Gateway
      */
     public static function sendToClient($client_id, $message, $raw = false)
     {
-        return static::sendCmdAndMessageToClient($client_id, Federation::CMD_SEND_TO_ONE, $message, '', $raw);
+        return static::sendCmdAndMessageToClient($client_id, Cluster::CMD_SEND_TO_ONE, $message, '', $raw);
     }
 
     /**
@@ -180,7 +180,7 @@ class Gateway
      */
     public static function sendToCurrentClient($message, $raw = false)
     {
-        return static::sendCmdAndMessageToClient(null, Federation::CMD_SEND_TO_ONE, $message, '', $raw);
+        return static::sendCmdAndMessageToClient(null, Cluster::CMD_SEND_TO_ONE, $message, '', $raw);
     }
 
     /**
@@ -212,8 +212,8 @@ class Gateway
                 return 0;
             }
         }
-        $gateway_data                  = Federation::$empty;
-        $gateway_data['cmd']           = Federation::CMD_IS_ONLINE;
+        $gateway_data                  = Cluster::$empty;
+        $gateway_data['cmd']           = Cluster::CMD_IS_ONLINE;
         $gateway_data['connection_id'] = $address_data['connection_id'];
         return (int)static::sendAndRecv($address, $gateway_data);
     }
@@ -226,11 +226,11 @@ class Gateway
      */
     public static function getAllClientSessions($group = '')
     {
-        $gateway_data = Federation::$empty;
+        $gateway_data = Cluster::$empty;
         if (!$group) {
-            $gateway_data['cmd']      = Federation::CMD_GET_ALL_CLIENT_SESSIONS;
+            $gateway_data['cmd']      = Cluster::CMD_GET_ALL_CLIENT_SESSIONS;
         } else {
-            $gateway_data['cmd']      = Federation::CMD_GET_CLIENT_SESSIONS_BY_GROUP;
+            $gateway_data['cmd']      = Cluster::CMD_GET_CLIENT_SESSIONS_BY_GROUP;
             $gateway_data['ext_data'] = $group;
         }
         $status_data      = array();
@@ -295,8 +295,8 @@ class Gateway
      */
     public static function getClientIdCountByGroup($group = '')
     {
-        $gateway_data             = Federation::$empty;
-        $gateway_data['cmd']      = Federation::CMD_GET_CLIENT_COUNT_BY_GROUP;
+        $gateway_data             = Cluster::$empty;
+        $gateway_data['cmd']      = Cluster::CMD_GET_CLIENT_COUNT_BY_GROUP;
         $gateway_data['ext_data'] = $group;
         $total_count              = 0;
         $all_buffer_array         = static::getBufferFromAllGateway($gateway_data);
@@ -387,8 +387,8 @@ class Gateway
      */
     public static function getClientIdByUid($uid)
     {
-        $gateway_data             = Federation::$empty;
-        $gateway_data['cmd']      = Federation::CMD_GET_CLIENT_ID_BY_UID;
+        $gateway_data             = Cluster::$empty;
+        $gateway_data['cmd']      = Cluster::CMD_GET_CLIENT_ID_BY_UID;
         $gateway_data['ext_data'] = $uid;
         $client_list              = array();
         $all_buffer_array         = static::getBufferFromAllGateway($gateway_data);
@@ -503,8 +503,8 @@ class Gateway
      */
     public static function getAllGroupIdList()
     {
-        $gateway_data             = Federation::$empty;
-        $gateway_data['cmd']      = Federation::CMD_GET_GROUP_ID_LIST;
+        $gateway_data             = Cluster::$empty;
+        $gateway_data['cmd']      = Cluster::CMD_GET_GROUP_ID_LIST;
         $group_id_list            = array();
         $all_buffer_array         = static::getBufferFromAllGateway($gateway_data);
         foreach ($all_buffer_array as $local_ip => $buffer_array) {
@@ -623,8 +623,8 @@ class Gateway
     protected static function select($fields = array('session', 'uid', 'groups'), $where = array())
     {
         $t = microtime(true);
-        $gateway_data             = Federation::$empty;
-        $gateway_data['cmd']      = Federation::CMD_SELECT;
+        $gateway_data             = Cluster::$empty;
+        $gateway_data['cmd']      = Cluster::CMD_SELECT;
         $gateway_data['ext_data'] = array('fields' => $fields, 'where' => $where);
         $gateway_data_list   = array();
         // 有client_id，能计算出需要和哪些gateway通讯，只和必要的gateway通讯能降低系统负载
@@ -671,12 +671,12 @@ class Gateway
      */
     protected static function generateAuthBuffer()
     {
-        $gateway_data         = Federation::$empty;
-        $gateway_data['cmd']  = Federation::CMD_GATEWAY_CLIENT_CONNECT;
+        $gateway_data         = Cluster::$empty;
+        $gateway_data['cmd']  = Cluster::CMD_GATEWAY_CLIENT_CONNECT;
         $gateway_data['body'] = json_encode(array(
             'secret_key' => static::$secretKey,
         ));
-        return Federation::encode($gateway_data);
+        return Cluster::encode($gateway_data);
     }
 
     /**
@@ -692,9 +692,9 @@ class Gateway
         $auth_buffer = static::$secretKey ? static::generateAuthBuffer() : '';
         foreach ($gateway_data_array as $address => $gateway_data) {
             if ($auth_buffer) {
-                $gateway_buffer_array[$address] = $auth_buffer . Federation::encode($gateway_data);
+                $gateway_buffer_array[$address] = $auth_buffer . Cluster::encode($gateway_data);
             } else {
-                $gateway_buffer_array[$address] = Federation::encode($gateway_data);
+                $gateway_buffer_array[$address] = Cluster::encode($gateway_data);
             }
         }
         return static::getBufferFromGateway($gateway_buffer_array);
@@ -711,7 +711,7 @@ class Gateway
     {
         $addresses = static::getAllGatewayAddress();
         $gateway_buffer_array = array();
-        $gateway_buffer = Federation::encode($gateway_data);
+        $gateway_buffer = Cluster::encode($gateway_data);
         $gateway_buffer = static::$secretKey ? static::generateAuthBuffer() . $gateway_buffer : $gateway_buffer;
         foreach ($addresses as $address) {
             $gateway_buffer_array[$address] = $gateway_buffer;
@@ -882,7 +882,7 @@ class Gateway
      */
     public static function bindUid($client_id, $uid)
     {
-        static::sendCmdAndMessageToClient($client_id, Federation::CMD_BIND_UID, '', $uid);
+        static::sendCmdAndMessageToClient($client_id, Cluster::CMD_BIND_UID, '', $uid);
     }
 
     /**
@@ -894,7 +894,7 @@ class Gateway
      */
     public static function unbindUid($client_id, $uid)
     {
-        static::sendCmdAndMessageToClient($client_id, Federation::CMD_UNBIND_UID, '', $uid);
+        static::sendCmdAndMessageToClient($client_id, Cluster::CMD_UNBIND_UID, '', $uid);
     }
 
     /**
@@ -907,7 +907,7 @@ class Gateway
     public static function joinGroup($client_id, $group)
     {
 
-        static::sendCmdAndMessageToClient($client_id, Federation::CMD_JOIN_GROUP, '', $group);
+        static::sendCmdAndMessageToClient($client_id, Cluster::CMD_JOIN_GROUP, '', $group);
     }
 
     /**
@@ -920,7 +920,7 @@ class Gateway
      */
     public static function leaveGroup($client_id, $group)
     {
-        static::sendCmdAndMessageToClient($client_id, Federation::CMD_LEAVE_GROUP, '', $group);
+        static::sendCmdAndMessageToClient($client_id, Cluster::CMD_LEAVE_GROUP, '', $group);
     }
 
     /**
@@ -935,8 +935,8 @@ class Gateway
         if (!static::isValidGroupId($group)) {
             return false;
         }
-        $gateway_data             = Federation::$empty;
-        $gateway_data['cmd']      = Federation::CMD_UNGROUP;
+        $gateway_data             = Cluster::$empty;
+        $gateway_data['cmd']      = Cluster::CMD_UNGROUP;
         $gateway_data['ext_data'] = $group;
         return static::sendToAllGateway($gateway_data);
     }
@@ -952,11 +952,11 @@ class Gateway
      */
     public static function sendToUid($uid, $message, $raw = false)
     {
-        $gateway_data         = Federation::$empty;
-        $gateway_data['cmd']  = Federation::CMD_SEND_TO_UID;
+        $gateway_data         = Cluster::$empty;
+        $gateway_data['cmd']  = Cluster::CMD_SEND_TO_UID;
         $gateway_data['body'] = $message;
         if ($raw) {
-            $gateway_data['flag'] |= Federation::FLAG_NOT_CALL_ENCODE;
+            $gateway_data['flag'] |= Cluster::FLAG_NOT_CALL_ENCODE;
         }
 
         if (!is_array($uid)) {
@@ -983,11 +983,11 @@ class Gateway
         if (!static::isValidGroupId($group)) {
             return false;
         }
-        $gateway_data         = Federation::$empty;
-        $gateway_data['cmd']  = Federation::CMD_SEND_TO_GROUP;
+        $gateway_data         = Cluster::$empty;
+        $gateway_data['cmd']  = Cluster::CMD_SEND_TO_GROUP;
         $gateway_data['body'] = $message;
         if ($raw) {
-            $gateway_data['flag'] |= Federation::FLAG_NOT_CALL_ENCODE;
+            $gateway_data['flag'] |= Cluster::FLAG_NOT_CALL_ENCODE;
         }
 
         if (!is_array($group)) {
@@ -1037,7 +1037,7 @@ class Gateway
      */
     public static function setSocketSession($client_id, $session_str)
     {
-        return static::sendCmdAndMessageToClient($client_id, Federation::CMD_SET_SESSION, '', $session_str);
+        return static::sendCmdAndMessageToClient($client_id, Cluster::CMD_SET_SESSION, '', $session_str);
     }
 
     /**
@@ -1071,7 +1071,7 @@ class Gateway
             $_SESSION = array_replace_recursive((array)$_SESSION, $session);
             Context::$old_session = $_SESSION;
         }
-        static::sendCmdAndMessageToClient($client_id, Federation::CMD_UPDATE_SESSION, '', Context::sessionEncode($session));
+        static::sendCmdAndMessageToClient($client_id, Cluster::CMD_UPDATE_SESSION, '', Context::sessionEncode($session));
     }
 
     /**
@@ -1092,8 +1092,8 @@ class Gateway
                 return null;
             }
         }
-        $gateway_data                  = Federation::$empty;
-        $gateway_data['cmd']           = Federation::CMD_GET_SESSION_BY_CLIENT_ID;
+        $gateway_data                  = Cluster::$empty;
+        $gateway_data['cmd']           = Cluster::CMD_GET_SESSION_BY_CLIENT_ID;
         $gateway_data['connection_id'] = $address_data['connection_id'];
         return static::sendAndRecv($address, $gateway_data);
     }
@@ -1122,7 +1122,7 @@ class Gateway
             $address       = long2ip($address_data['local_ip']) . ":{$address_data['local_port']}";
             $connection_id = $address_data['connection_id'];
         }
-        $gateway_data                  = Federation::$empty;
+        $gateway_data                  = Cluster::$empty;
         $gateway_data['cmd']           = $cmd;
         $gateway_data['connection_id'] = $connection_id;
         $gateway_data['body']          = $message;
@@ -1130,7 +1130,7 @@ class Gateway
             $gateway_data['ext_data'] = $ext_data;
         }
         if ($raw) {
-            $gateway_data['flag'] |= Federation::FLAG_NOT_CALL_ENCODE;
+            $gateway_data['flag'] |= Cluster::FLAG_NOT_CALL_ENCODE;
         }
 
         return static::sendToGateway($address, $gateway_data);
@@ -1146,7 +1146,7 @@ class Gateway
      */
     protected static function sendAndRecv($address, $data)
     {
-        $buffer = Federation::encode($data);
+        $buffer = Cluster::encode($data);
         $buffer = static::$secretKey ? static::generateAuthBuffer() . $buffer : $buffer;
         $address = "tcp://$address";
         $client = static::getGatewayConnection($address);
@@ -1202,7 +1202,7 @@ class Gateway
      */
     protected static function sendToGateway($address, $gateway_data)
     {
-        return static::sendBufferToGateway($address, Federation::encode($gateway_data));
+        return static::sendBufferToGateway($address, Cluster::encode($gateway_data));
     }
 
     /**
@@ -1236,7 +1236,7 @@ class Gateway
      */
     protected static function sendToAllGateway($gateway_data)
     {
-        $buffer = Federation::encode($gateway_data);
+        $buffer = Cluster::encode($gateway_data);
         // 如果有businessServer实例，说明运行在workerman环境中，通过businessServer中的长连接发送数据
         if (static::$businessServer) {
             foreach (static::$businessServer->gatewayConnections as $gateway_connection) {
@@ -1261,8 +1261,8 @@ class Gateway
      */
     protected static function kickAddress($address, $connection_id, $message)
     {
-        $gateway_data                  = Federation::$empty;
-        $gateway_data['cmd']           = Federation::CMD_KICK;
+        $gateway_data                  = Cluster::$empty;
+        $gateway_data['cmd']           = Cluster::CMD_KICK;
         $gateway_data['connection_id'] = $connection_id;
         $gateway_data['body'] = $message;
         return static::sendToGateway($address, $gateway_data);
@@ -1277,8 +1277,8 @@ class Gateway
      */
     protected static function destroyAddress($address, $connection_id)
     {
-        $gateway_data                  = Federation::$empty;
-        $gateway_data['cmd']           = Federation::CMD_DESTROY;
+        $gateway_data                  = Cluster::$empty;
+        $gateway_data['cmd']           = Cluster::CMD_DESTROY;
         $gateway_data['connection_id'] = $connection_id;
         return static::sendToGateway($address, $gateway_data);
     }
@@ -1413,5 +1413,5 @@ class Gateway
 }
 
 if (!class_exists('\Protocols\Federation')) {
-    class_alias('localzet\Cluster\Protocols\Federation', 'Protocols\Federation');
+    class_alias('localzet\Cluster\Protocols\Cluster', 'Protocols\Federation');
 }

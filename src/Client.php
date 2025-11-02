@@ -1,7 +1,7 @@
 <?php
 
 /**
- * @package     MultiCore Server
+ * @package     Cluster Server
  * @link        https://localzet.gitbook.io
  * @author      localzet <creator@localzet.ru>
  * @copyright   Copyright (c) 2018-2022 RootX Group
@@ -10,17 +10,17 @@
 
 namespace localzet\Cluster;
 
-/** localzet WebCore */
+/** localzet Server */
 
 use localzet\Server\Connection\TcpConnection;
 
-/** RootX MultiCore */
+/** RootX Cluster */
 
-use localzet\Cluster\Protocols\Federation;
+use localzet\Cluster\Protocols\Cluster;
 use localzet\Cluster\Lib\Context;
 
 /**
- * RootX MultiCore Client
+ * RootX Cluster Client
  */
 class Client
 {
@@ -78,11 +78,11 @@ class Client
         $exclude_client_id = null,
         $raw = false
     ) {
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_SEND_TO_ALL;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_SEND_TO_ALL;
         $gateway_data['body'] = $message;
         if ($raw) {
-            $gateway_data['flag'] |= Federation::FLAG_NOT_CALL_ENCODE;
+            $gateway_data['flag'] |= Cluster::FLAG_NOT_CALL_ENCODE;
         }
 
         if ($exclude_client_id) {
@@ -178,7 +178,7 @@ class Client
     {
         return static::sendCmdAndMessageToClient(
             $client_id,
-            Federation::CMD_SEND_TO_ONE,
+            Cluster::CMD_SEND_TO_ONE,
             $message,
             '',
             $raw
@@ -196,7 +196,7 @@ class Client
     {
         return static::sendCmdAndMessageToClient(
             null,
-            Federation::CMD_SEND_TO_ONE,
+            Cluster::CMD_SEND_TO_ONE,
             $message,
             '',
             $raw
@@ -234,8 +234,8 @@ class Client
                 return 0;
             }
         }
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_IS_ONLINE;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_IS_ONLINE;
         $gateway_data['connection_id'] = $address_data['connection_id'];
         return (int) static::sendAndRecv($address, $gateway_data);
     }
@@ -248,12 +248,12 @@ class Client
      */
     public static function getAllClientSessions($group = '')
     {
-        $gateway_data = Federation::$empty;
+        $gateway_data = Cluster::$empty;
         if (!$group) {
-            $gateway_data['cmd'] = Federation::CMD_GET_ALL_CLIENT_SESSIONS;
+            $gateway_data['cmd'] = Cluster::CMD_GET_ALL_CLIENT_SESSIONS;
         } else {
             $gateway_data['cmd'] =
-                Federation::CMD_GET_CLIENT_SESSIONS_BY_GROUP;
+                Cluster::CMD_GET_CLIENT_SESSIONS_BY_GROUP;
             $gateway_data['ext_data'] = $group;
         }
         $status_data = [];
@@ -314,8 +314,8 @@ class Client
      */
     public static function getClientCountByGroup($group = '')
     {
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_GET_CLIENT_COUNT_BY_GROUP;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_GET_CLIENT_COUNT_BY_GROUP;
         $gateway_data['ext_data'] = $group;
         $total_count = 0;
         $all_buffer_array = static::getBufferFromAllGateway($gateway_data);
@@ -405,8 +405,8 @@ class Client
      */
     public static function getClientIdByUid($uid)
     {
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_GET_CLIENT_ID_BY_UID;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_GET_CLIENT_ID_BY_UID;
         $gateway_data['ext_data'] = $uid;
         $client_list = [];
         $all_buffer_array = static::getBufferFromAllGateway($gateway_data);
@@ -525,8 +525,8 @@ class Client
      */
     public static function getAllGroupIdList()
     {
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_GET_GROUP_ID_LIST;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_GET_GROUP_ID_LIST;
         $group_id_list = [];
         $all_buffer_array = static::getBufferFromAllGateway($gateway_data);
         foreach ($all_buffer_array as $local_ip => $buffer_array) {
@@ -647,8 +647,8 @@ class Client
         $where = []
     ) {
         $t = microtime(true);
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_SELECT;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_SELECT;
         $gateway_data['ext_data'] = ['fields' => $fields, 'where' => $where];
         $gateway_data_list = [];
 
@@ -704,12 +704,12 @@ class Client
      */
     protected static function generateAuthBuffer()
     {
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_MULTI_CLIENT_CONNECT;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_MULTI_CLIENT_CONNECT;
         $gateway_data['body'] = json_encode([
             'secret_key' => static::$secretKey,
         ]);
-        return Federation::encode($gateway_data);
+        return Cluster::encode($gateway_data);
     }
 
     /**
@@ -726,9 +726,9 @@ class Client
         foreach ($gateway_data_array as $address => $gateway_data) {
             if ($auth_buffer) {
                 $gateway_buffer_array[$address] =
-                    $auth_buffer . Federation::encode($gateway_data);
+                    $auth_buffer . Cluster::encode($gateway_data);
             } else {
-                $gateway_buffer_array[$address] = Federation::encode(
+                $gateway_buffer_array[$address] = Cluster::encode(
                     $gateway_data
                 );
             }
@@ -747,7 +747,7 @@ class Client
     {
         $addresses = static::getAllGatewayAddress();
         $gateway_buffer_array = [];
-        $gateway_buffer = Federation::encode($gateway_data);
+        $gateway_buffer = Cluster::encode($gateway_data);
         $gateway_buffer = static::$secretKey
             ? static::generateAuthBuffer() . $gateway_buffer
             : $gateway_buffer;
@@ -962,7 +962,7 @@ class Client
     {
         static::sendCmdAndMessageToClient(
             $client_id,
-            Federation::CMD_BIND_UID,
+            Cluster::CMD_BIND_UID,
             '',
             $uid
         );
@@ -979,7 +979,7 @@ class Client
     {
         static::sendCmdAndMessageToClient(
             $client_id,
-            Federation::CMD_UNBIND_UID,
+            Cluster::CMD_UNBIND_UID,
             '',
             $uid
         );
@@ -996,7 +996,7 @@ class Client
     {
         static::sendCmdAndMessageToClient(
             $client_id,
-            Federation::CMD_JOIN_GROUP,
+            Cluster::CMD_JOIN_GROUP,
             '',
             $group
         );
@@ -1014,7 +1014,7 @@ class Client
     {
         static::sendCmdAndMessageToClient(
             $client_id,
-            Federation::CMD_LEAVE_GROUP,
+            Cluster::CMD_LEAVE_GROUP,
             '',
             $group
         );
@@ -1032,8 +1032,8 @@ class Client
         if (!static::isValidGroupId($group)) {
             return false;
         }
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_UNGROUP;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_UNGROUP;
         $gateway_data['ext_data'] = $group;
         return static::sendToAllGateway($gateway_data);
     }
@@ -1049,11 +1049,11 @@ class Client
      */
     public static function sendToUid($uid, $message, $raw = false)
     {
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_SEND_TO_UID;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_SEND_TO_UID;
         $gateway_data['body'] = $message;
         if ($raw) {
-            $gateway_data['flag'] |= Federation::FLAG_NOT_CALL_ENCODE;
+            $gateway_data['flag'] |= Cluster::FLAG_NOT_CALL_ENCODE;
         }
 
         if (!is_array($uid)) {
@@ -1084,11 +1084,11 @@ class Client
         if (!static::isValidGroupId($group)) {
             return false;
         }
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_SEND_TO_GROUP;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_SEND_TO_GROUP;
         $gateway_data['body'] = $message;
         if ($raw) {
-            $gateway_data['flag'] |= Federation::FLAG_NOT_CALL_ENCODE;
+            $gateway_data['flag'] |= Cluster::FLAG_NOT_CALL_ENCODE;
         }
 
         if (!is_array($group)) {
@@ -1156,7 +1156,7 @@ class Client
     {
         return static::sendCmdAndMessageToClient(
             $client_id,
-            Federation::CMD_SET_SESSION,
+            Cluster::CMD_SET_SESSION,
             '',
             $session_str
         );
@@ -1195,7 +1195,7 @@ class Client
         }
         static::sendCmdAndMessageToClient(
             $client_id,
-            Federation::CMD_UPDATE_SESSION,
+            Cluster::CMD_UPDATE_SESSION,
             '',
             Context::sessionEncode($session)
         );
@@ -1221,8 +1221,8 @@ class Client
                 return null;
             }
         }
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_GET_SESSION_BY_CLIENT_ID;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_GET_SESSION_BY_CLIENT_ID;
         $gateway_data['connection_id'] = $address_data['connection_id'];
         return static::sendAndRecv($address, $gateway_data);
     }
@@ -1258,7 +1258,7 @@ class Client
                 ":{$address_data['local_port']}";
             $connection_id = $address_data['connection_id'];
         }
-        $gateway_data = Federation::$empty;
+        $gateway_data = Cluster::$empty;
         $gateway_data['cmd'] = $cmd;
         $gateway_data['connection_id'] = $connection_id;
         $gateway_data['body'] = $message;
@@ -1266,7 +1266,7 @@ class Client
             $gateway_data['ext_data'] = $ext_data;
         }
         if ($raw) {
-            $gateway_data['flag'] |= Federation::FLAG_NOT_CALL_ENCODE;
+            $gateway_data['flag'] |= Cluster::FLAG_NOT_CALL_ENCODE;
         }
 
         return static::sendToGateway($address, $gateway_data);
@@ -1282,7 +1282,7 @@ class Client
      */
     protected static function sendAndRecv($address, $data)
     {
-        $buffer = Federation::encode($data);
+        $buffer = Cluster::encode($data);
         $buffer = static::$secretKey
             ? static::generateAuthBuffer() . $buffer
             : $buffer;
@@ -1353,7 +1353,7 @@ class Client
     {
         return static::sendBufferToGateway(
             $address,
-            Federation::encode($gateway_data)
+            Cluster::encode($gateway_data)
         );
     }
 
@@ -1403,7 +1403,7 @@ class Client
      */
     protected static function sendToAllGateway($gateway_data)
     {
-        $buffer = Federation::encode($gateway_data);
+        $buffer = Cluster::encode($gateway_data);
         // 如果有businessServer实例，说明运行在serverman环境中，通过businessServer中的长连接发送数据
         if (static::$businessServer) {
             foreach (static::$businessServer->gatewayConnections
@@ -1430,8 +1430,8 @@ class Client
      */
     protected static function kickAddress($address, $connection_id, $message)
     {
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_KICK;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_KICK;
         $gateway_data['connection_id'] = $connection_id;
         $gateway_data['body'] = $message;
         return static::sendToGateway($address, $gateway_data);
@@ -1446,8 +1446,8 @@ class Client
      */
     protected static function destroyAddress($address, $connection_id)
     {
-        $gateway_data = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_DESTROY;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_DESTROY;
         $gateway_data['connection_id'] = $connection_id;
         return static::sendToGateway($address, $gateway_data);
     }
@@ -1578,7 +1578,7 @@ class Client
 
 if (!class_exists('\Protocols\Federation')) {
     class_alias(
-        'localzet\Cluster\Protocols\Federation',
+        'localzet\Cluster\Protocols\Cluster',
         'Protocols\Federation'
     );
 }

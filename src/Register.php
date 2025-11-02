@@ -5,29 +5,32 @@ declare(strict_types=1);
 /**
  * @package     Localzet Cluster
  * @link        https://github.com/localzet/Cluster
- * 
+ *
  * @author      Ivan Zorin <creator@localzet.com>
  * @copyright   Copyright (c) 2018-2024 Localzet Group
  * @license     https://www.gnu.org/licenses/agpl AGPL-3.0 license
- * 
+ *
  *              This program is free software: you can redistribute it and/or modify
  *              it under the terms of the GNU Affero General Public License as
  *              published by the Free Software Foundation, either version 3 of the
  *              License, or (at your option) any later version.
- *              
+ *
  *              This program is distributed in the hope that it will be useful,
  *              but WITHOUT ANY WARRANTY; without even the implied warranty of
  *              MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *              GNU Affero General Public License for more details.
- *              
+ *
  *              You should have received a copy of the GNU Affero General Public License
  *              along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 namespace localzet\Cluster;
 
-use localzet\Server\Timer;
 use localzet\Server;
+use localzet\Server\Connection\TcpConnection;
+use localzet\Server\Protocols\Text;
+use localzet\Timer;
+use Throwable;
 
 /**
  * Регистратор
@@ -35,38 +38,41 @@ use localzet\Server;
  */
 class Register extends Server
 {
-
-    /**
-     * @var string Секретный ключ для аутентификации соединений.
-     */
-    public $secretKey = '';
-
     /**
      * @var array Массив соединений со шлюзами.
      */
-    protected $_gatewayConnections = array();
+    protected array $_gatewayConnections = [];
 
     /**
-     * @var array Массив соединений со серверами.
+     * @var array Массив соединений с серверами.
      */
-    protected $_serverConnections = array();
+    protected array $_serverConnections = [];
 
     /**
      * @var int Время запуска процесса.
      */
-    protected $_startTime = 0;
+    protected int $_startTime = 0;
+
+    public string $name = 'Регистратор';
+
+    public bool $reloadable = false;
+
+    public ?string $protocol = Text::class;
+
+    public bool $reusePort = false;
 
     /**
-     * Конструктор класса Register.
-     * 
-     * @param string|null $socketName Имя сокета.
-     * @param array $contextOption Дополнительные параметры контекста.
+     * @param string|null $socketName
+     * @param array $socketContext
+     * @param string|null $secretKey Секретный ключ для аутентификации соединений
      */
-    public function __construct(string $socketName = null, array $contextOption = [])
+    public function __construct(?string $socketName = null, array $socketContext = [], public ?string $secretKey = null)
     {
-        $this->name = 'Регистратор';
-        $this->reloadable = false;
-        parent::__construct($socketName, $contextOption);
+        parent::__construct($socketName, $socketContext);
+
+        $this->secretKey ??= base64_encode(sha1(sprintf('%04x%04x%04x%04x%04x%04x%04x%04x',
+            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000,
+            mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)), true));
     }
 
     /**
@@ -74,37 +80,23 @@ class Register extends Server
      */
     public function run(): void
     {
-        // Устанавливаем обратный вызов onConnect для установки нового соединения.
-        $this->onConnect = array($this, 'onConnect');
+        $this->onConnect = [$this, 'onConnect'];
+        $this->onMessage = [$this, 'onMessage'];
+        $this->onClose = [$this, 'onClose'];
 
-        // Устанавливаем обратный вызов onMessage для обработки сообщений.
-        $this->onMessage = array($this, 'onMessage');
-
-        // Устанавливаем обратный вызов onClose для закрытия соединения.
-        $this->onClose = array($this, 'onClose');
-
-        // Записываем время запуска процесса.
         $this->_startTime = time();
-
-        // Устанавливаем протокол передачи сообщений - Text.
-        $this->protocol = '\localzet\Server\Protocols\Text';
-
-        // Отключаем опцию reusePort.
-        $this->reusePort = false;
-
-        // Запускаем сервер.
         parent::run();
     }
 
     /**
      * Устанавливает таймер для закрытия соединения, если не была получена аутентификация.
      *
-     * @param \localzet\Server\Connection\ConnectionInterface $connection Соединение.
+     * @param TcpConnection $connection Соединение.
      */
-    public function onConnect($connection)
+    public function onConnect(TcpConnection $connection): void
     {
         $connection->timeout_timerid = Timer::add(10, function () use ($connection) {
-            Server::log("Регистратор: Время аутентификации регистратора истекло (" . $connection->getRemoteIp() . ")");
+            Server::log("Регистратор: Время аутентификации истекло (" . $connection->getRemoteIp() . ")");
             $connection->close();
         }, null, false);
     }
@@ -112,10 +104,11 @@ class Register extends Server
     /**
      * Обрабатывает полученное сообщение.
      *
-     * @param \localzet\Server\Connection\ConnectionInterface $connection Соединение.
+     * @param TcpConnection $connection Соединение.
      * @param string $buffer Буфер с сообщением.
+     * @throws Throwable
      */
-    public function onMessage($connection, $buffer)
+    public function onMessage(TcpConnection $connection, string $buffer): void
     {
         // Удаляем таймер для закрытия соединения.
         Timer::del($connection->timeout_timerid);
@@ -124,43 +117,45 @@ class Register extends Server
         $data = @json_decode($buffer, true);
 
         if (empty($data['event'])) {
-            $error = "Невернный запрос для Регистратора. Информация о запросе (IP:" . $connection->getRemoteIp() . ", Буфер запроса:$buffer)";
+            $error = "Невернный запрос для Регистратора. Информация о запросе (IP: " . $connection->getRemoteIp() . ", Буфер запроса: $buffer)";
             Server::log($error);
-            return $connection->close($error);
+            $connection->close($error);
+            return;
         }
 
         $event = $data['event'];
-        $secret_key = isset($data['secret_key']) ? $data['secret_key'] : '';
+        $secret_key = $data['secret_key'] ?? '';
 
-        // Проверяем аутентификацию в зависимости от типа соединения.
         switch ($event) {
             case 'gateway_connect':
-                // Соединение со шлюзом
                 if (empty($data['address'])) {
-                    echo "Адрес не найден\n";
-                    return $connection->close();
+                    Server::log("Регистратор: Адрес не найден от " . $connection->getRemoteIp());
+                    $connection->close();
+                    return;
                 }
-                if ($secret_key !== $this->secretKey) {
-                    Server::log("Регистратор: Ключ не соответствует " . var_export($secret_key, true) . " !== " . var_export($this->secretKey, true));
-                    return $connection->close();
+
+                if ($this->secretKey && $secret_key !== $this->secretKey) {
+                    Server::log("Регистратор: Ключ не соответствует от " . $connection->getRemoteIp());
+                    $connection->close();
+                    return;
                 }
+
                 $this->_gatewayConnections[$connection->id] = $data['address'];
                 $this->broadcastAddresses();
                 break;
             case 'server_connect':
-                // Соединение с сервером
-                if ($secret_key !== $this->secretKey) {
-                    Server::log("Регистратор: Ключ не соответствует " . var_export($secret_key, true) . " !== " . var_export($this->secretKey, true));
-                    return $connection->close();
+                if ($this->secretKey && $secret_key !== $this->secretKey) {
+                    Server::log("Регистратор: Ключ не соответствует от " . $connection->getRemoteIp());
+                    $connection->close();
+                    return;
                 }
+
                 $this->_serverConnections[$connection->id] = $connection;
                 $this->broadcastAddresses($connection);
                 break;
             case 'ping':
-                // Сообщение ping
                 break;
             default:
-                // Неизвестное событие
                 Server::log("Регистратор: неизвестное событие: $event IP: " . $connection->getRemoteIp() . " Буфер: $buffer");
                 $connection->close();
         }
@@ -169,45 +164,36 @@ class Register extends Server
     /**
      * Обработчик закрытия соединения.
      *
-     * @param \localzet\Server\Connection\ConnectionInterface $connection Соединение.
+     * @param TcpConnection $connection Соединение.
      */
-    public function onClose($connection)
+    public function onClose(TcpConnection $connection): void
     {
+        // Удаляем соединение со списков серверов.
+        if (isset($this->_serverConnections[$connection->id])) {
+            unset($this->_serverConnections[$connection->id]);
+        }
+
         // Удаляем соединение со списков шлюзов и обновляем список адресов.
         if (isset($this->_gatewayConnections[$connection->id])) {
             unset($this->_gatewayConnections[$connection->id]);
             $this->broadcastAddresses();
-        }
-
-        // Удаляем соединение со списков серверов.
-        if (isset($this->_serverConnections[$connection->id])) {
-            unset($this->_serverConnections[$connection->id]);
         }
     }
 
     /**
      * Отправляет сообщение с адресами шлюзов всем серверам.
      *
-     * @param \localzet\Server\Connection\ConnectionInterface|null $connection Соединение, для которого отправляется сообщение.
+     * @param TcpConnection|null $connection Соединение, для которого отправляется сообщение.
      */
-    public function broadcastAddresses($connection = null)
+    public function broadcastAddresses(TcpConnection $connection = null): void
     {
-        $data = array(
+        $data = [
             'event' => 'broadcast_addresses',
             'addresses' => array_unique(array_values($this->_gatewayConnections)),
-        );
+        ];
 
-        $buffer = json_encode($data);
-
-        if ($connection) {
-            // Если указано конкретное соединение, отправляем ему сообщение.
-            $connection->send($buffer);
-            return;
-        }
-
-        // Отправляем сообщение всем серверам.
-        foreach ($this->_serverConnections as $con) {
-            $con->send($buffer);
+        foreach ($connection ? (array)$connection : $this->_serverConnections as $connection) {
+            $connection->send(json_encode($data));
         }
     }
 }

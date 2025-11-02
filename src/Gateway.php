@@ -5,21 +5,21 @@ declare(strict_types=1);
 /**
  * @package     Localzet Cluster
  * @link        https://github.com/localzet/Cluster
- * 
+ *
  * @author      Ivan Zorin <creator@localzet.com>
  * @copyright   Copyright (c) 2018-2024 Localzet Group
  * @license     https://www.gnu.org/licenses/agpl AGPL-3.0 license
- * 
+ *
  *              This program is free software: you can redistribute it and/or modify
  *              it under the terms of the GNU Affero General Public License as
  *              published by the Free Software Foundation, either version 3 of the
  *              License, or (at your option) any later version.
- *              
+ *
  *              This program is distributed in the hope that it will be useful,
  *              but WITHOUT ANY WARRANTY; without even the implied warranty of
  *              MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *              GNU Affero General Public License for more details.
- *              
+ *
  *              You should have received a copy of the GNU Affero General Public License
  *              along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
@@ -28,15 +28,17 @@ namespace localzet\Cluster;
 
 /** Localzet Server */
 
-use localzet\Server\Timer;
+use localzet\Cluster\Gateway\ClientTrait;
+use localzet\Cluster\Gateway\ServerTrait;
+use localzet\Cluster\Lib\Context;
+use localzet\Cluster\Protocols\Cluster;
 use localzet\Server;
-use localzet\Server\Connection\TcpConnection;
 use localzet\Server\Connection\AsyncTcpConnection;
+use localzet\Server\Connection\TcpConnection;
+use localzet\Timer;
+use Protocols\Federation;
 
 /** Localzet Cluster */
-
-use localzet\Cluster\Lib\Context;
-use localzet\Cluster\Protocols\Federation;
 
 /**
  * Шлюз
@@ -44,6 +46,8 @@ use localzet\Cluster\Protocols\Federation;
  */
 class Gateway extends Server
 {
+    use ClientTrait, ServerTrait;
+
     /**
      * IP-адрес локальной машины.
      * При развертывании на одной машине используется значение по умолчанию 127.0.0.1.
@@ -109,13 +113,6 @@ class Gateway extends Server
      * @var string
      */
     public $pingData = '';
-
-    /**
-     * 秘钥
-     *
-     * @var string
-     */
-    public $secretKey = '';
 
     /**
      * 路由函数
@@ -248,6 +245,8 @@ class Gateway extends Server
      */
     protected static $_connectionIdRecorder = 0;
 
+    public bool $reloadable = false;
+
     /**
      * 用于保持长连接的心跳时间间隔
      *
@@ -258,15 +257,22 @@ class Gateway extends Server
     /**
      * 构造函数
      *
-     * @param string $socket_name
-     * @param array  $context_option
+     * @param string|null $socketName
+     * @param array $socketContext
+     * @param string|null $secretKey
      */
-    public function __construct($socket_name, $context_option = array())
+    public function __construct(?string $socketName = null, array $socketContext = [], public ?string $secretKey = null)
     {
-        parent::__construct($socket_name, $context_option);
-        $this->reloadable = false;
-        $this->_gatewayPort = substr(strrchr($socket_name, ':'), 1);
-        $this->router = array("\\localzet\Cluster\\Gateway", 'routerBind');
+        parent::__construct($socketName, $socketContext);
+
+        // Extract port from socket name (e.g., "websocket://0.0.0.0:7273" -> "7273")
+        if ($socketName && strpos($socketName, ':') !== false) {
+            $portPart = substr(strrchr($socketName, ':'), 1);
+            $this->_gatewayPort = is_numeric($portPart) ? (int)$portPart : 0;
+        } else {
+            $this->_gatewayPort = 0;
+        }
+        $this->router = [Gateway::class, 'routerBind'];
     }
 
     /**
@@ -274,85 +280,19 @@ class Gateway extends Server
      */
     public function run(): void
     {
-        // 保存用户的回调，当对应的事件发生时触发
-        $this->_onServerStart = $this->onServerStart;
-        $this->onServerStart  = array($this, 'onServerStart');
-        // 保存用户的回调，当对应的事件发生时触发
-        $this->_onConnect = $this->onConnect;
-        $this->onConnect  = array($this, 'onClientConnect');
+        $this->onServerStart = array($this, 'onServerStart');
+        $this->onServerStop = array($this, 'onServerStop');
 
-        // onMessage禁止用户设置回调
-        $this->onMessage = array($this, 'onClientMessage');
-
-        // 保存用户的回调，当对应的事件发生时触发
-        $this->_onClose = $this->onClose;
-        $this->onClose  = array($this, 'onClientClose');
-        // 保存用户的回调，当对应的事件发生时触发
-        $this->_onServerStop = $this->onServerStop;
-        $this->onServerStop  = array($this, 'onServerStop');
+        $this->onConnect = [$this, 'onClientConnect'];
+        $this->onMessage = [$this, 'onClientMessage'];
+        $this->onClose = [$this, 'onClientClose'];
 
         if (!is_array($this->registerAddress)) {
-            $this->registerAddress = array($this->registerAddress);
+            $this->registerAddress = [$this->registerAddress];
         }
-
-        // 记录进程启动的时间
         $this->_startTime = time();
-        // 运行父方法
+
         parent::run();
-    }
-
-    /**
-     * 当客户端发来数据时，转发给server处理
-     *
-     * @param TcpConnection $connection
-     * @param mixed         $data
-     */
-    public function onClientMessage($connection, $data)
-    {
-        $connection->pingNotResponseCount = -1;
-        $this->sendToServer(Federation::CMD_ON_MESSAGE, $connection, $data);
-    }
-
-    /**
-     * 当客户端连接上来时，初始化一些客户端的数据
-     * 包括全局唯一的client_id、初始化session等
-     *
-     * @param TcpConnection $connection
-     */
-    public function onClientConnect($connection)
-    {
-        $connection->id = self::generateConnectionId();
-        // 保存该连接的内部通讯的数据包报头，避免每次重新初始化
-        $connection->gatewayHeader = array(
-            'local_ip'      => ip2long($this->lanIp),
-            'local_port'    => $this->lanPort,
-            'client_ip'     => ip2long($connection->getRemoteIp()),
-            'client_port'   => $connection->getRemotePort(),
-            'gateway_port'  => $this->_gatewayPort,
-            'connection_id' => $connection->id,
-            'flag'          => 0,
-        );
-        // 连接的 session
-        $connection->session                       = '';
-        // 该连接的心跳参数
-        $connection->pingNotResponseCount          = -1;
-        // 该链接发送缓冲区大小
-        $connection->maxSendBufferSize             = $this->sendToClientBufferSize;
-        // 保存客户端连接 connection 对象
-        $this->_clientConnections[$connection->id] = $connection;
-
-        // 如果用户有自定义 onConnect 回调，则执行
-        if ($this->_onConnect) {
-            call_user_func($this->_onConnect, $connection);
-            if (isset($connection->onWebSocketConnect)) {
-                $connection->_onWebSocketConnect = $connection->onWebSocketConnect;
-            }
-        }
-        if ($connection->protocol === '\localzet\Server\Protocols\Websocket' || $connection->protocol === 'localzet\Server\Protocols\Websocket') {
-            $connection->onWebSocketConnect = array($this, 'onWebsocketConnect');
-        }
-
-        $this->sendToServer(Federation::CMD_ON_CONNECT, $connection);
     }
 
     /**
@@ -387,7 +327,7 @@ class Gateway extends Server
         } else {
             $data = array('get' => $_GET, 'server' => $_SERVER, 'cookie' => $_COOKIE);
         }
-        $this->sendToServer(Federation::CMD_ON_WEBSOCKET_CONNECT, $connection, $data);
+        $this->sendToServer(Cluster::CMD_ON_WEBSOCKET_CONNECT, $connection, $data);
     }
 
     /**
@@ -409,50 +349,12 @@ class Gateway extends Server
     }
 
     /**
-     * 发送数据给 server 进程
-     *
-     * @param int           $cmd
-     * @param TcpConnection $connection
-     * @param mixed         $body
-     * @return bool
-     */
-    protected function sendToServer($cmd, $connection, $body = '')
-    {
-        $gateway_data             = $connection->gatewayHeader;
-        $gateway_data['cmd']      = $cmd;
-        $gateway_data['body']     = $body;
-        $gateway_data['ext_data'] = $connection->session;
-        if ($this->_serverConnections) {
-            // 调用路由函数，选择一个server把请求转发给它
-            /** @var TcpConnection $server_connection */
-            $server_connection = call_user_func($this->router, $this->_serverConnections, $connection, $cmd, $body);
-            if (false === $server_connection->send($gateway_data)) {
-                $msg = "SendBufferToServer fail. May be the send buffer are overflow. See http://doc2.workerman.net/send-buffer-overflow.html";
-                static::log($msg);
-                return false;
-            }
-        } // 没有可用的 server
-        else {
-            // gateway 启动后 1-2 秒内 SendBufferToServer fail 是正常现象，因为与 server 的连接还没建立起来，
-            // 所以不记录日志，只是关闭连接
-            $time_diff = 2;
-            if (time() - $this->_startTime >= $time_diff) {
-                $msg = 'SendBufferToServer fail. The connections between Gateway and Business are not ready. See http://doc2.workerman.net/send-buffer-to-worker-fail.html';
-                static::log($msg);
-            }
-            $connection->destroy();
-            return false;
-        }
-        return true;
-    }
-
-    /**
      * 随机路由，返回 server connection 对象
      *
-     * @param array         $server_connections
+     * @param array $server_connections
      * @param TcpConnection $client_connection
-     * @param int           $cmd
-     * @param mixed         $buffer
+     * @param int $cmd
+     * @param mixed $buffer
      * @return TcpConnection
      */
     public static function routerRand($server_connections, $client_connection, $cmd, $buffer)
@@ -463,10 +365,10 @@ class Gateway extends Server
     /**
      * client_id 与 server 绑定
      *
-     * @param array         $server_connections
+     * @param array $server_connections
      * @param TcpConnection $client_connection
-     * @param int           $cmd
-     * @param mixed         $buffer
+     * @param int $cmd
+     * @param mixed $buffer
      * @return TcpConnection
      */
     public static function routerBind($server_connections, $client_connection, $cmd, $buffer)
@@ -477,38 +379,6 @@ class Gateway extends Server
         return $server_connections[$client_connection->businessserver_address];
     }
 
-    /**
-     * 当客户端关闭时
-     *
-     * @param TcpConnection $connection
-     */
-    public function onClientClose($connection)
-    {
-        // 尝试通知 server，触发 Event::onClose
-        $this->sendToServer(Federation::CMD_ON_CLOSE, $connection);
-        unset($this->_clientConnections[$connection->id]);
-        // 清理 uid 数据
-        if (!empty($connection->uid)) {
-            $uid = $connection->uid;
-            unset($this->_uidConnections[$uid][$connection->id]);
-            if (empty($this->_uidConnections[$uid])) {
-                unset($this->_uidConnections[$uid]);
-            }
-        }
-        // 清理 group 数据
-        if (!empty($connection->groups)) {
-            foreach ($connection->groups as $group) {
-                unset($this->_groupConnections[$group][$connection->id]);
-                if (empty($this->_groupConnections[$group])) {
-                    unset($this->_groupConnections[$group]);
-                }
-            }
-        }
-        // 触发 onClose
-        if ($this->_onClose) {
-            call_user_func($this->_onClose, $connection);
-        }
-    }
 
     /**
      * 当 Gateway 启动的时候触发的回调函数
@@ -517,22 +387,19 @@ class Gateway extends Server
      */
     public function onServerStart()
     {
-        // 分配一个内部通讯端口
         $this->lanPort = $this->startPort + $this->id;
 
-        // 如果有设置心跳，则定时执行
         if ($this->pingInterval > 0) {
             $timer_interval = $this->pingNotResponseLimit > 0 ? $this->pingInterval / 2 : $this->pingInterval;
-            Timer::add($timer_interval, array($this, 'ping'));
+            Timer::add($timer_interval, [$this, 'ping']);
         }
 
-        // 如果Business ip不是127.0.0.1，则需要加gateway到Business的心跳
         if ($this->lanIp !== '127.0.0.1') {
-            Timer::add(self::PERSISTENCE_CONNECTION_PING_INTERVAL, array($this, 'pingBusiness'));
+            Timer::add(self::PERSISTENCE_CONNECTION_PING_INTERVAL, [$this, 'pingBusiness']);
         }
 
-        if (!class_exists('\Protocols\Federation')) {
-            class_alias('localzet\Cluster\Protocols\Federation', 'Protocols\Federation');
+        if (!class_exists(Federation::class)) {
+            class_alias(Cluster::class, Federation::class);
         }
 
         //如为公网IP监听，直接换成0.0.0.0 ，否则用内网IP
@@ -551,16 +418,11 @@ class Gateway extends Server
 
         // 设置内部监听的相关回调
         $this->_innerTcpServer->onMessage = array($this, 'onServerMessage');
-
         $this->_innerTcpServer->onConnect = array($this, 'onServerConnect');
-        $this->_innerTcpServer->onClose   = array($this, 'onServerClose');
+        $this->_innerTcpServer->onClose = array($this, 'onServerClose');
 
         // 注册 gateway 的内部通讯地址，server 去连这个地址，以便 gateway 与 server 之间建立起 TCP 长连接
         $this->registerAddress();
-
-        if ($this->_onServerStart) {
-            call_user_func($this->_onServerStart, $this);
-        }
     }
 
 
@@ -579,25 +441,25 @@ class Gateway extends Server
      * 当 server 发来数据时
      *
      * @param TcpConnection $connection
-     * @param mixed         $data
+     * @param mixed $data
+     * @return void
      * @throws \Exception
      *
-     * @return void
      */
     public function onServerMessage($connection, $data)
     {
         $cmd = $data['cmd'];
-        if (empty($connection->authorized) && $cmd !== Federation::CMD_SERVER_CONNECT && $cmd !== Federation::CMD_GATEWAY_CLIENT_CONNECT) {
+        if (empty($connection->authorized) && $cmd !== Cluster::CMD_SERVER_CONNECT && $cmd !== Cluster::CMD_GATEWAY_CLIENT_CONNECT) {
             self::log("Unauthorized request from " . $connection->getRemoteIp() . ":" . $connection->getRemotePort());
             $connection->close();
             return;
         }
         switch ($cmd) {
-                // Business连接Gateway
-            case Federation::CMD_SERVER_CONNECT:
+            // Business连接Gateway
+            case Cluster::CMD_SERVER_CONNECT:
                 $server_info = json_decode($data['body'], true);
-                if ($server_info['secret_key'] !== $this->secretKey) {
-                    self::log("Gateway: Server key does not match " . var_export($this->secretKey, true) . " !== " . var_export($this->secretKey));
+                if (!isset($server_info['secret_key']) || $server_info['secret_key'] !== $this->secretKey) {
+                    self::log("Gateway: Server key does not match or missing. Expected: " . var_export($this->secretKey, true));
                     $connection->close();
                     return;
                 }
@@ -615,20 +477,20 @@ class Gateway extends Server
                     call_user_func($this->onBusinessConnected, $connection);
                 }
                 return;
-                // GatewayClient连接Gateway
-            case Federation::CMD_GATEWAY_CLIENT_CONNECT:
+            // GatewayClient连接Gateway
+            case Cluster::CMD_GATEWAY_CLIENT_CONNECT:
                 $server_info = json_decode($data['body'], true);
-                if ($server_info['secret_key'] !== $this->secretKey) {
-                    self::log("Gateway: GatewayClient key does not match " . var_export($this->secretKey, true) . " !== " . var_export($this->secretKey, true));
+                if (!isset($server_info['secret_key']) || $server_info['secret_key'] !== $this->secretKey) {
+                    self::log("Gateway: GatewayClient key does not match or missing. Expected: " . var_export($this->secretKey, true));
                     $connection->close();
                     return;
                 }
                 $connection->authorized = true;
                 return;
-                // 向某客户端发送数据，Gateway::sendToClient($client_id, $message);
-            case Federation::CMD_SEND_TO_ONE:
+            // 向某客户端发送数据，Gateway::sendToClient($client_id, $message);
+            case Cluster::CMD_SEND_TO_ONE:
                 if (isset($this->_clientConnections[$data['connection_id']])) {
-                    $raw = (bool)($data['flag'] & Federation::FLAG_NOT_CALL_ENCODE);
+                    $raw = (bool)($data['flag'] & Cluster::FLAG_NOT_CALL_ENCODE);
                     $body = $data['body'];
                     if (!$raw && $this->protocolAccelerate && $this->protocol) {
                         $body = $this->preEncodeForClient($body);
@@ -637,21 +499,21 @@ class Gateway extends Server
                     $this->_clientConnections[$data['connection_id']]->send($body, $raw);
                 }
                 return;
-                // 踢出用户，Gateway::closeClient($client_id, $message);
-            case Federation::CMD_KICK:
+            // 踢出用户，Gateway::closeClient($client_id, $message);
+            case Cluster::CMD_KICK:
                 if (isset($this->_clientConnections[$data['connection_id']])) {
                     $this->_clientConnections[$data['connection_id']]->close($data['body']);
                 }
                 return;
-                // 立即销毁用户连接, Gateway::destroyClient($client_id);
-            case Federation::CMD_DESTROY:
+            // 立即销毁用户连接, Gateway::destroyClient($client_id);
+            case Cluster::CMD_DESTROY:
                 if (isset($this->_clientConnections[$data['connection_id']])) {
                     $this->_clientConnections[$data['connection_id']]->destroy();
                 }
                 return;
-                // 广播, Gateway::sendToAll($message, $client_id_array)
-            case Federation::CMD_SEND_TO_ALL:
-                $raw = (bool)($data['flag'] & Federation::FLAG_NOT_CALL_ENCODE);
+            // 广播, Gateway::sendToAll($message, $client_id_array)
+            case Cluster::CMD_SEND_TO_ALL:
+                $raw = (bool)($data['flag'] & Cluster::FLAG_NOT_CALL_ENCODE);
                 $body = $data['body'];
                 if (!$raw && $this->protocolAccelerate && $this->protocol) {
                     $body = $this->preEncodeForClient($body);
@@ -675,7 +537,7 @@ class Gateway extends Server
                     }
                 }
                 return;
-            case Federation::CMD_SELECT:
+            case Cluster::CMD_SELECT:
                 $client_info_array = array();
                 $ext_data = json_decode($data['ext_data'], true);
                 if (!$ext_data) {
@@ -685,11 +547,11 @@ class Gateway extends Server
                     return;
                 }
                 $fields = $ext_data['fields'];
-                $where  = $ext_data['where'];
+                $where = $ext_data['where'];
                 if ($where) {
                     $connection_box_map = array(
-                        'groups'        => $this->_groupConnections,
-                        'uid'           => $this->_uidConnections
+                        'groups' => $this->_groupConnections,
+                        'uid' => $this->_uidConnections
                     );
                     // $where = ['groups'=>[x,x..], 'uid'=>[x,x..], 'connection_id'=>[x,x..]]
                     foreach ($where as $key => $items) {
@@ -731,19 +593,19 @@ class Gateway extends Server
                 $buffer = serialize($client_info_array);
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-                // 获取在线群组列表
-            case Federation::CMD_GET_GROUP_ID_LIST:
+            // 获取在线群组列表
+            case Cluster::CMD_GET_GROUP_ID_LIST:
                 $buffer = serialize(array_keys($this->_groupConnections));
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-                // 重新赋值 session
-            case Federation::CMD_SET_SESSION:
+            // 重新赋值 session
+            case Cluster::CMD_SET_SESSION:
                 if (isset($this->_clientConnections[$data['connection_id']])) {
                     $this->_clientConnections[$data['connection_id']]->session = $data['ext_data'];
                 }
                 return;
-                // session合并
-            case Federation::CMD_UPDATE_SESSION:
+            // session合并
+            case Cluster::CMD_UPDATE_SESSION:
                 if (!isset($this->_clientConnections[$data['connection_id']])) {
                     return;
                 } else {
@@ -757,7 +619,7 @@ class Gateway extends Server
                     $this->_clientConnections[$data['connection_id']]->session = Context::sessionEncode($session);
                 }
                 return;
-            case Federation::CMD_GET_SESSION_BY_CLIENT_ID:
+            case Cluster::CMD_GET_SESSION_BY_CLIENT_ID:
                 if (!isset($this->_clientConnections[$data['connection_id']])) {
                     $session = serialize(null);
                 } else {
@@ -769,8 +631,8 @@ class Gateway extends Server
                 }
                 $connection->send(pack('N', strlen($session)) . $session, true);
                 return;
-                // 获得客户端sessions
-            case Federation::CMD_GET_ALL_CLIENT_SESSIONS:
+            // 获得客户端sessions
+            case Cluster::CMD_GET_ALL_CLIENT_SESSIONS:
                 $client_info_array = array();
                 foreach ($this->_clientConnections as $connection_id => $client_connection) {
                     $client_info_array[$connection_id] = $client_connection->session;
@@ -778,13 +640,13 @@ class Gateway extends Server
                 $buffer = serialize($client_info_array);
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-                // 判断某个 client_id 是否在线 Gateway::isOnline($client_id)
-            case Federation::CMD_IS_ONLINE:
+            // 判断某个 client_id 是否在线 Gateway::isOnline($client_id)
+            case Cluster::CMD_IS_ONLINE:
                 $buffer = serialize((int)isset($this->_clientConnections[$data['connection_id']]));
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-                // 将 client_id 与 uid 绑定
-            case Federation::CMD_BIND_UID:
+            // 将 client_id 与 uid 绑定
+            case Cluster::CMD_BIND_UID:
                 $uid = $data['ext_data'];
                 if (empty($uid)) {
                     echo "bindUid(client_id, uid) uid empty, uid=" . var_export($uid, true);
@@ -802,11 +664,11 @@ class Gateway extends Server
                         unset($this->_uidConnections[$current_uid]);
                     }
                 }
-                $client_connection->uid                      = $uid;
+                $client_connection->uid = $uid;
                 $this->_uidConnections[$uid][$connection_id] = $client_connection;
                 return;
-                // client_id 与 uid 解绑 Gateway::unbindUid($client_id, $uid);
-            case Federation::CMD_UNBIND_UID:
+            // client_id 与 uid 解绑 Gateway::unbindUid($client_id, $uid);
+            case Cluster::CMD_UNBIND_UID:
                 $connection_id = $data['connection_id'];
                 if (!isset($this->_clientConnections[$connection_id])) {
                     return;
@@ -819,12 +681,12 @@ class Gateway extends Server
                         unset($this->_uidConnections[$current_uid]);
                     }
                     $client_connection->uid_info = '';
-                    $client_connection->uid      = null;
+                    $client_connection->uid = null;
                 }
                 return;
-                // 发送数据给 uid Gateway::sendToUid($uid, $msg);
-            case Federation::CMD_SEND_TO_UID:
-                $raw = (bool)($data['flag'] & Federation::FLAG_NOT_CALL_ENCODE);
+            // 发送数据给 uid Gateway::sendToUid($uid, $msg);
+            case Cluster::CMD_SEND_TO_UID:
+                $raw = (bool)($data['flag'] & Cluster::FLAG_NOT_CALL_ENCODE);
                 $body = $data['body'];
                 if (!$raw && $this->protocolAccelerate && $this->protocol) {
                     $body = $this->preEncodeForClient($body);
@@ -840,8 +702,8 @@ class Gateway extends Server
                     }
                 }
                 return;
-                // 将 $client_id 加入用户组 Gateway::joinGroup($client_id, $group);
-            case Federation::CMD_JOIN_GROUP:
+            // 将 $client_id 加入用户组 Gateway::joinGroup($client_id, $group);
+            case Cluster::CMD_JOIN_GROUP:
                 $group = $data['ext_data'];
                 if (empty($group)) {
                     echo "join(group) group empty, group=" . var_export($group, true);
@@ -855,11 +717,11 @@ class Gateway extends Server
                 if (!isset($client_connection->groups)) {
                     $client_connection->groups = array();
                 }
-                $client_connection->groups[$group]               = $group;
+                $client_connection->groups[$group] = $group;
                 $this->_groupConnections[$group][$connection_id] = $client_connection;
                 return;
-                // 将 $client_id 从某个用户组中移除 Gateway::leaveGroup($client_id, $group);
-            case Federation::CMD_LEAVE_GROUP:
+            // 将 $client_id 从某个用户组中移除 Gateway::leaveGroup($client_id, $group);
+            case Cluster::CMD_LEAVE_GROUP:
                 $group = $data['ext_data'];
                 if (empty($group)) {
                     echo "leave(group) group empty, group=" . var_export($group, true);
@@ -878,8 +740,8 @@ class Gateway extends Server
                     unset($this->_groupConnections[$group]);
                 }
                 return;
-                // 解散分组
-            case Federation::CMD_UNGROUP:
+            // 解散分组
+            case Cluster::CMD_UNGROUP:
                 $group = $data['ext_data'];
                 if (empty($group)) {
                     echo "leave(group) group empty, group=" . var_export($group, true);
@@ -893,9 +755,9 @@ class Gateway extends Server
                 }
                 unset($this->_groupConnections[$group]);
                 return;
-                // 向某个用户组发送消息 Gateway::sendToGroup($group, $msg);
-            case Federation::CMD_SEND_TO_GROUP:
-                $raw = (bool)($data['flag'] & Federation::FLAG_NOT_CALL_ENCODE);
+            // 向某个用户组发送消息 Gateway::sendToGroup($group, $msg);
+            case Cluster::CMD_SEND_TO_GROUP:
+                $raw = (bool)($data['flag'] & Cluster::FLAG_NOT_CALL_ENCODE);
                 $body = $data['body'];
                 if (!$raw && $this->protocolAccelerate && $this->protocol) {
                     $body = $this->preEncodeForClient($body);
@@ -916,8 +778,8 @@ class Gateway extends Server
                     }
                 }
                 return;
-                // 获取某用户组成员信息 Gateway::getClientSessionsByGroup($group);
-            case Federation::CMD_GET_CLIENT_SESSIONS_BY_GROUP:
+            // 获取某用户组成员信息 Gateway::getClientSessionsByGroup($group);
+            case Cluster::CMD_GET_CLIENT_SESSIONS_BY_GROUP:
                 $group = $data['ext_data'];
                 if (!isset($this->_groupConnections[$group])) {
                     $buffer = serialize(array());
@@ -931,8 +793,8 @@ class Gateway extends Server
                 $buffer = serialize($client_info_array);
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-                // 获取用户组成员数 Gateway::getClientCountByGroup($group);
-            case Federation::CMD_GET_CLIENT_COUNT_BY_GROUP:
+            // 获取用户组成员数 Gateway::getClientCountByGroup($group);
+            case Cluster::CMD_GET_CLIENT_COUNT_BY_GROUP:
                 $group = $data['ext_data'];
                 $count = 0;
                 if ($group !== '') {
@@ -945,8 +807,8 @@ class Gateway extends Server
                 $buffer = serialize($count);
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-                // 获取与某个 uid 绑定的所有 client_id Gateway::getClientIdByUid($uid);
-            case Federation::CMD_GET_CLIENT_ID_BY_UID:
+            // 获取与某个 uid 绑定的所有 client_id Gateway::getClientIdByUid($uid);
+            case Cluster::CMD_GET_CLIENT_ID_BY_UID:
                 $uid = $data['ext_data'];
                 if (empty($this->_uidConnections[$uid])) {
                     $buffer = serialize(array());
@@ -1052,8 +914,8 @@ class Gateway extends Server
      */
     public function pingBusiness()
     {
-        $gateway_data        = Federation::$empty;
-        $gateway_data['cmd'] = Federation::CMD_PING;
+        $gateway_data = Cluster::$empty;
+        $gateway_data['cmd'] = Cluster::CMD_PING;
         foreach ($this->_serverConnections as $connection) {
             $connection->send($gateway_data);
         }
