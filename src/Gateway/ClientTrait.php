@@ -28,7 +28,7 @@ trait ClientTrait
     public function onClientConnect(TcpConnection $connection): void
     {
         $connection->id = self::generateConnectionId();
-        // 保存该连接的内部通讯的数据包报头，避免每次重新初始化
+        // Сохранение заголовка пакета для внутренней коммуникации (кеширование для производительности)
         $connection->gatewayHeader = array(
             'local_ip' => ip2long($this->lanIp),
             'local_port' => $this->lanPort,
@@ -38,16 +38,16 @@ trait ClientTrait
             'connection_id' => $connection->id,
             'flag' => 0,
         );
-        // 连接的 session
+        // Инициализация сессии соединения
         $connection->session = '';
-        // 该连接的心跳参数
+        // Счетчик неотвеченных ping (-1 означает недавнюю активность клиента)
         $connection->pingNotResponseCount = -1;
-        // 该链接发送缓冲区大小
+        // Размер буфера отправки для этого соединения
         $connection->maxSendBufferSize = $this->sendToClientBufferSize;
-        // 保存客户端连接 connection 对象
+        // Сохранение объекта соединения клиента
         $this->_clientConnections[$connection->id] = $connection;
 
-        // 如果用户有自定义 onConnect 回调，则执行
+        // Вызов пользовательского callback onConnect, если задан
         if ($this->_onConnect) {
             call_user_func($this->_onConnect, $connection);
             if (isset($connection->onWebSocketConnect)) {
@@ -68,10 +68,10 @@ trait ClientTrait
      */
     public function onClientClose(TcpConnection $connection): void
     {
-        // 尝试通知 server，触发 Event::onClose
+        // Уведомление Business Worker о закрытии соединения
         $this->sendToServer(Cluster::CMD_ON_CLOSE, $connection);
         unset($this->_clientConnections[$connection->id]);
-        // 清理 uid 数据
+        // Очистка данных привязки UID
         if (!empty($connection->uid)) {
             $uid = $connection->uid;
             unset($this->_uidConnections[$uid][$connection->id]);
@@ -79,7 +79,7 @@ trait ClientTrait
                 unset($this->_uidConnections[$uid]);
             }
         }
-        // 清理 group 数据
+        // Очистка данных групп
         if (!empty($connection->groups)) {
             foreach ($connection->groups as $group) {
                 unset($this->_groupConnections[$group][$connection->id]);
@@ -88,7 +88,7 @@ trait ClientTrait
                 }
             }
         }
-        // 触发 onClose
+        // Вызов callback onClose
         if ($this->_onClose) {
             call_user_func($this->_onClose, $connection);
         }

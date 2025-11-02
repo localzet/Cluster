@@ -234,7 +234,7 @@ class Business extends Server
             call_user_func($this->eventHandler . '::onServerStart', $this);
         }
 
-        // 设置回调
+        // Настройка callback функций из класса Events
         if (is_callable($this->eventHandler . '::onConnect')) {
             $this->_eventOnConnect = $this->eventHandler . '::onConnect';
         }
@@ -261,18 +261,18 @@ class Business extends Server
      */
     protected function onServerReload($server)
     {
-        // 防止进程立刻退出
+        // Предотвращаем немедленный выход процесса
         $server->reloadable = false;
-        // 延迟 0.05 秒退出，避免 Business 瞬间全部退出导致没有可用的 Business 进程
+        // Задержка 0.05 секунды перед выходом, чтобы избежать одновременного завершения всех Business процессов
         Timer::add(0.05, array('localzet\Server', 'stopAll'));
-        // 执行用户定义的 onServerReload 回调
+        // Вызов пользовательского callback onServerReload
         if ($this->_onServerReload) {
             call_user_func($this->_onServerReload, $this);
         }
     }
 
     /**
-     * 当进程关闭时一些清理工作
+     * Callback при остановке процесса (очистка ресурсов)
      *
      * @return void
      */
@@ -287,7 +287,7 @@ class Business extends Server
     }
 
     /**
-     * 连接服务注册中心
+     * Подключение к Register для получения списка Gateway
      * 
      * @return void
      */
@@ -298,7 +298,7 @@ class Business extends Server
             $secret_key = $this->secretKey;
             $register_connection->onConnect = function () use ($register_connection, $secret_key, $register_address) {
                 $register_connection->send('{"event":"server_connect","secret_key":"' . $secret_key . '"}');
-                // 如果Register服务器不在本地服务器，则需要保持心跳
+                // Если Register на удаленном сервере, поддерживаем ping
                 if (strpos($register_address, '127.0.0.1') !== 0) {
                     $register_connection->ping_timer = Timer::add(self::PERSISTENCE_CONNECTION_PING_INTERVAL, function () use ($register_connection) {
                         $register_connection->send('{"event":"ping"}');
@@ -360,7 +360,7 @@ class Business extends Server
         if ($cmd === Cluster::CMD_PING) {
             return;
         }
-        // 上下文数据
+        // Инициализация контекстных данных клиента
         Context::$client_ip     = $data['client_ip'];
         Context::$client_port   = $data['client_port'];
         Context::$local_ip      = $data['local_ip'];
@@ -371,7 +371,7 @@ class Business extends Server
             $data['local_port'],
             $data['connection_id']
         );
-        // $_SERVER 变量
+        // Заполнение $_SERVER для совместимости
         $_SERVER = array(
             'REMOTE_ADDR'       => long2ip($data['client_ip']),
             'REMOTE_PORT'       => $data['client_port'],
@@ -379,7 +379,7 @@ class Business extends Server
             'GATEWAY_PORT'      => $data['gateway_port'],
             'GATEWAY_CLIENT_ID' => Context::$client_id,
         );
-        // 检查session版本，如果是过期的session数据则拉取最新的数据
+        // Проверка версии сессии: если данные устарели, загружаем актуальные
         if ($cmd !== Cluster::CMD_ON_CLOSE && isset($this->_sessionVersion[Context::$client_id]) && $this->_sessionVersion[Context::$client_id] !== crc32($data['ext_data'])) {
             $_SESSION = Context::$old_session = \localzet\Cluster\Lib\Gateway::getSession(Context::$client_id);
             $this->_sessionVersion[Context::$client_id] = crc32($data['ext_data']);
@@ -387,7 +387,7 @@ class Business extends Server
             if (!isset($this->_sessionVersion[Context::$client_id])) {
                 $this->_sessionVersion[Context::$client_id] = crc32($data['ext_data']);
             }
-            // 尝试解析 session
+            // Декодирование сессии
             if ($data['ext_data'] != '') {
                 Context::$old_session = $_SESSION = Context::sessionDecode($data['ext_data']);
             } else {
@@ -395,7 +395,7 @@ class Business extends Server
             }
         }
 
-        // 尝试执行 Event::onConnection、Event::onMessage、Event::onClose
+        // Вызов соответствующих событий из Events класса
         switch ($cmd) {
             case Cluster::CMD_ON_CONNECT:
                 if ($this->_eventOnConnect) {
@@ -420,12 +420,12 @@ class Business extends Server
                 break;
         }
 
-        // session 必须是数组
+        // Сессия должна быть массивом
         if ($_SESSION !== null && !is_array($_SESSION)) {
             throw new \Exception('$_SESSION must be an array. But $_SESSION=' . var_export($_SESSION, true) . ' is not array.');
         }
 
-        // 判断 session 是否被更改
+        // Проверка изменений в сессии и сохранение при необходимости
         if ($_SESSION !== Context::$old_session && $cmd !== Cluster::CMD_ON_CLOSE) {
             $session_str_now = $_SESSION !== null ? Context::sessionEncode($_SESSION) : '';
             \localzet\Cluster\Lib\Gateway::setSocketSession(Context::$client_id, $session_str_now);

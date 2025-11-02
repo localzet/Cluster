@@ -101,118 +101,120 @@ class Gateway extends Server
     public $pingInterval = 0;
 
     /**
-     * $pingNotResponseLimit * $pingInterval 时间内，客户端未发送任何数据，断开客户端连接
+     * Лимит неотвеченных ping перед отключением клиента
+     * Если клиент не отвечает на ping $pingNotResponseLimit раз, соединение закрывается
      *
      * @var int
      */
     public $pingNotResponseLimit = 0;
 
     /**
-     * 服务端向客户端发送的心跳数据
+     * Данные для отправки ping клиентам
      *
      * @var string
      */
     public $pingData = '';
 
     /**
-     * 路由函数
+     * Функция маршрутизации сообщений к Business Worker
      *
      * @var callable|null
      */
     public $router = null;
 
-
     /**
-     * gateway进程转发给businessServer进程的发送缓冲区大小
+     * Размер буфера отправки данных от Gateway к Business Worker
      *
      * @var int
      */
     public $sendToServerBufferSize = 10240000;
 
     /**
-     * gateway进程将数据发给客户端时每个客户端发送缓冲区大小
+     * Размер буфера отправки данных каждому клиенту
      *
      * @var int
      */
     public $sendToClientBufferSize = 1024000;
 
     /**
-     * 协议加速
+     * Ускорение протокола
      *
      * @var bool
      */
     public $protocolAccelerate = false;
 
     /**
-     * Business 连接成功之后触发
+     * Callback при успешном подключении Business Worker
      *
      * @var callable|null
      */
     public $onBusinessConnected = null;
 
     /**
-     * Business 关闭时触发
+     * Callback при отключении Business Worker
      *
      * @var callable|null
      */
     public $onBusinessClose = null;
 
     /**
-     * 保存客户端的所有 connection 对象
+     * Все клиентские соединения (connection_id => TcpConnection)
      *
      * @var array
      */
     protected $_clientConnections = array();
 
     /**
-     * uid 到 connection 的映射，一对多关系
+     * Маппинг UID к соединениям (uid => [connection_id1, connection_id2, ...])
+     *
+     * @var array
      */
     protected $_uidConnections = array();
 
     /**
-     * group 到 connection 的映射，一对多关系
+     * Маппинг группы к соединениям (group => [connection_id1, connection_id2, ...])
      *
      * @var array
      */
     protected $_groupConnections = array();
 
     /**
-     * 保存所有 server 的内部连接的 connection 对象
+     * Внутренние соединения с Business Worker (key => TcpConnection)
      *
      * @var array
      */
     protected $_serverConnections = array();
 
     /**
-     * gateway 内部监听 server 内部连接的 server
+     * Внутренний TCP сервер для приема соединений от Business Worker
      *
      * @var Server
      */
     protected $_innerTcpServer = null;
 
     /**
-     * 当 server 启动时
+     * Callback при запуске сервера
      *
      * @var callable|null
      */
     protected $_onServerStart = null;
 
     /**
-     * 当有客户端连接时
+     * Callback при подключении клиента
      *
      * @var callable|null
      */
     protected $_onConnect = null;
 
     /**
-     * 当客户端发来消息时
+     * Callback при получении сообщения от клиента
      *
      * @var callable|null
      */
     protected $_onMessage = null;
 
     /**
-     * 当客户端连接关闭时
+     * Callback при отключении клиента
      *
      * @var callable|null
      */
@@ -402,32 +404,32 @@ class Gateway extends Server
             class_alias(Cluster::class, Federation::class);
         }
 
-        //如为公网IP监听，直接换成0.0.0.0 ，否则用内网IP
+        // Если IP публичный, слушаем на 0.0.0.0, иначе используем внутренний IP
         $listen_ip = filter_var($this->lanIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) ? '0.0.0.0' : $this->lanIp;
 
-        //Use scenario to see line 64
+        // Если указан специальный IP для внутреннего сервера, используем его
         if ($this->innerTcpServerListen != '') {
             $listen_ip = $this->innerTcpServerListen;
         }
 
-        // 初始化 gateway 内部的监听，用于监听 server 的连接已经连接上发来的数据
+        // Инициализация внутреннего TCP сервера для приема соединений от Business Worker
         $this->_innerTcpServer = new Server("Federation://{$listen_ip}:{$this->lanPort}");
         $this->_innerTcpServer->reusePort = false;
         $this->_innerTcpServer->listen();
         $this->_innerTcpServer->name = 'GatewayInnerServer';
 
-        // 设置内部监听的相关回调
+        // Настройка обработчиков внутреннего сервера
         $this->_innerTcpServer->onMessage = array($this, 'onServerMessage');
         $this->_innerTcpServer->onConnect = array($this, 'onServerConnect');
         $this->_innerTcpServer->onClose = array($this, 'onServerClose');
 
-        // 注册 gateway 的内部通讯地址，server 去连这个地址，以便 gateway 与 server 之间建立起 TCP 长连接
+        // Регистрация адреса Gateway в Register для обнаружения Business Worker
         $this->registerAddress();
     }
 
 
     /**
-     * 当 server 通过内部通讯端口连接到 gateway 时
+     * Обработчик подключения Business Worker через внутренний порт
      *
      * @param TcpConnection $connection
      */
@@ -438,13 +440,12 @@ class Gateway extends Server
     }
 
     /**
-     * 当 server 发来数据时
+     * Обработчик сообщений от Business Worker
      *
      * @param TcpConnection $connection
      * @param mixed $data
      * @return void
      * @throws \Exception
-     *
      */
     public function onServerMessage($connection, $data)
     {
@@ -455,7 +456,7 @@ class Gateway extends Server
             return;
         }
         switch ($cmd) {
-            // Business连接Gateway
+            // Подключение Business Worker к Gateway
             case Cluster::CMD_SERVER_CONNECT:
                 $server_info = json_decode($data['body'], true);
                 if (!isset($server_info['secret_key']) || $server_info['secret_key'] !== $this->secretKey) {
@@ -464,7 +465,7 @@ class Gateway extends Server
                     return;
                 }
                 $key = $connection->getRemoteIp() . ':' . $server_info['server_key'];
-                // 在一台服务器上businessServer->name不能相同
+                // Проверка конфликта имени Business Worker (на одном сервере имена должны быть уникальными)
                 if (isset($this->_serverConnections[$key])) {
                     self::log("Gateway: Server->name conflict. Key:{$key}");
                     $connection->close();
@@ -477,7 +478,7 @@ class Gateway extends Server
                     call_user_func($this->onBusinessConnected, $connection);
                 }
                 return;
-            // GatewayClient连接Gateway
+            // Подключение Gateway Client к Gateway
             case Cluster::CMD_GATEWAY_CLIENT_CONNECT:
                 $server_info = json_decode($data['body'], true);
                 if (!isset($server_info['secret_key']) || $server_info['secret_key'] !== $this->secretKey) {
@@ -487,7 +488,7 @@ class Gateway extends Server
                 }
                 $connection->authorized = true;
                 return;
-            // 向某客户端发送数据，Gateway::sendToClient($client_id, $message);
+            // Отправка данных конкретному клиенту
             case Cluster::CMD_SEND_TO_ONE:
                 if (isset($this->_clientConnections[$data['connection_id']])) {
                     $raw = (bool)($data['flag'] & Cluster::FLAG_NOT_CALL_ENCODE);
@@ -499,19 +500,19 @@ class Gateway extends Server
                     $this->_clientConnections[$data['connection_id']]->send($body, $raw);
                 }
                 return;
-            // 踢出用户，Gateway::closeClient($client_id, $message);
+            // Закрытие соединения клиента с сообщением
             case Cluster::CMD_KICK:
                 if (isset($this->_clientConnections[$data['connection_id']])) {
                     $this->_clientConnections[$data['connection_id']]->close($data['body']);
                 }
                 return;
-            // 立即销毁用户连接, Gateway::destroyClient($client_id);
+            // Немедленное уничтожение соединения клиента
             case Cluster::CMD_DESTROY:
                 if (isset($this->_clientConnections[$data['connection_id']])) {
                     $this->_clientConnections[$data['connection_id']]->destroy();
                 }
                 return;
-            // 广播, Gateway::sendToAll($message, $client_id_array)
+            // Рассылка сообщений всем клиентам или списку клиентов
             case Cluster::CMD_SEND_TO_ALL:
                 $raw = (bool)($data['flag'] & Cluster::FLAG_NOT_CALL_ENCODE);
                 $body = $data['body'];
@@ -520,14 +521,15 @@ class Gateway extends Server
                     $raw = true;
                 }
                 $ext_data = $data['ext_data'] ? json_decode($data['ext_data'], true) : '';
-                // $client_id_array 不为空时，只广播给 $client_id_array 指定的客户端
+                // Если указан список клиентов, отправляем только им
                 if (isset($ext_data['connections'])) {
                     foreach ($ext_data['connections'] as $connection_id) {
                         if (isset($this->_clientConnections[$connection_id])) {
                             $this->_clientConnections[$connection_id]->send($body, $raw);
                         }
                     }
-                } // $client_id_array 为空时，广播给所有在线客户端
+                }
+                // Иначе отправляем всем онлайн клиентам
                 else {
                     $exclude_connection_id = !empty($ext_data['exclude']) ? $ext_data['exclude'] : null;
                     foreach ($this->_clientConnections as $client_connection) {
@@ -593,18 +595,18 @@ class Gateway extends Server
                 $buffer = serialize($client_info_array);
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-            // 获取在线群组列表
+            // Получение списка онлайн групп
             case Cluster::CMD_GET_GROUP_ID_LIST:
                 $buffer = serialize(array_keys($this->_groupConnections));
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-            // 重新赋值 session
+            // Установка сессии (полная замена)
             case Cluster::CMD_SET_SESSION:
                 if (isset($this->_clientConnections[$data['connection_id']])) {
                     $this->_clientConnections[$data['connection_id']]->session = $data['ext_data'];
                 }
                 return;
-            // session合并
+            // Обновление сессии (слияние)
             case Cluster::CMD_UPDATE_SESSION:
                 if (!isset($this->_clientConnections[$data['connection_id']])) {
                     return;
@@ -631,7 +633,7 @@ class Gateway extends Server
                 }
                 $connection->send(pack('N', strlen($session)) . $session, true);
                 return;
-            // 获得客户端sessions
+            // Получение всех клиентских сессий
             case Cluster::CMD_GET_ALL_CLIENT_SESSIONS:
                 $client_info_array = array();
                 foreach ($this->_clientConnections as $connection_id => $client_connection) {
@@ -640,12 +642,12 @@ class Gateway extends Server
                 $buffer = serialize($client_info_array);
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-            // 判断某个 client_id 是否在线 Gateway::isOnline($client_id)
+            // Проверка онлайн статуса клиента
             case Cluster::CMD_IS_ONLINE:
                 $buffer = serialize((int)isset($this->_clientConnections[$data['connection_id']]));
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-            // 将 client_id 与 uid 绑定
+            // Привязка client_id к UID
             case Cluster::CMD_BIND_UID:
                 $uid = $data['ext_data'];
                 if (empty($uid)) {
@@ -684,7 +686,7 @@ class Gateway extends Server
                     $client_connection->uid = null;
                 }
                 return;
-            // 发送数据给 uid Gateway::sendToUid($uid, $msg);
+            // Отправка данных по UID
             case Cluster::CMD_SEND_TO_UID:
                 $raw = (bool)($data['flag'] & Cluster::FLAG_NOT_CALL_ENCODE);
                 $body = $data['body'];
@@ -702,7 +704,7 @@ class Gateway extends Server
                     }
                 }
                 return;
-            // 将 $client_id 加入用户组 Gateway::joinGroup($client_id, $group);
+            // Добавление клиента в группу
             case Cluster::CMD_JOIN_GROUP:
                 $group = $data['ext_data'];
                 if (empty($group)) {
@@ -740,7 +742,7 @@ class Gateway extends Server
                     unset($this->_groupConnections[$group]);
                 }
                 return;
-            // 解散分组
+            // Распустить группу
             case Cluster::CMD_UNGROUP:
                 $group = $data['ext_data'];
                 if (empty($group)) {
@@ -778,7 +780,7 @@ class Gateway extends Server
                     }
                 }
                 return;
-            // 获取某用户组成员信息 Gateway::getClientSessionsByGroup($group);
+            // Получение информации о членах группы
             case Cluster::CMD_GET_CLIENT_SESSIONS_BY_GROUP:
                 $group = $data['ext_data'];
                 if (!isset($this->_groupConnections[$group])) {
@@ -793,7 +795,7 @@ class Gateway extends Server
                 $buffer = serialize($client_info_array);
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-            // 获取用户组成员数 Gateway::getClientCountByGroup($group);
+            // Получение количества членов группы
             case Cluster::CMD_GET_CLIENT_COUNT_BY_GROUP:
                 $group = $data['ext_data'];
                 $count = 0;
@@ -807,7 +809,7 @@ class Gateway extends Server
                 $buffer = serialize($count);
                 $connection->send(pack('N', strlen($buffer)) . $buffer, true);
                 return;
-            // 获取与某个 uid 绑定的所有 client_id Gateway::getClientIdByUid($uid);
+            // Получение всех client_id, привязанных к UID
             case Cluster::CMD_GET_CLIENT_ID_BY_UID:
                 $uid = $data['ext_data'];
                 if (empty($this->_uidConnections[$uid])) {
@@ -825,7 +827,7 @@ class Gateway extends Server
 
 
     /**
-     * 当server连接关闭时
+     * Обработчик закрытия соединения с Business Worker
      *
      * @param TcpConnection $connection
      */
@@ -840,7 +842,7 @@ class Gateway extends Server
     }
 
     /**
-     * 存储当前 Gateway 的内部通信地址
+     * Регистрация внутреннего адреса Gateway в Register
      *
      * @return bool
      */
@@ -871,7 +873,7 @@ class Gateway extends Server
 
 
     /**
-     * 心跳逻辑
+     * Обработка ping для всех клиентских соединений
      *
      * @return void
      */

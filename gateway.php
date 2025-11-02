@@ -22,40 +22,28 @@ $gateway->pingData = '{"type":"ping"}';
 $gateway->registerAddress = '127.0.0.1:1236';
 $gateway->secretKey = 'your-secret-key-here';
 
-// 当客户端连接上来时，设置连接的onWebSocketConnect，即在websocket握手时的回调
+// Обработчик подключения клиента
 $gateway->onConnect = function ($connection) {
     Server::log('onConnect');
 
+    // Обработчик WebSocket handshake
     $connection->onWebSocketConnect = function ($connection, $http_header) {
         Server::log('onWebSocketConnect');
-        // 可以在这里判断连接来源是否合法，不合法就关掉连接
-        // $_SERVER['HTTP_ORIGIN']标识来自哪个站点的页面发起的websocket链接
-        // if($_SERVER['HTTP_ORIGIN'] != 'http://chat.workerman.net')
-        // {
-        //     $connection->close();
-        // }
-        // onWebSocketConnect 里面$_GET $_SERVER是可用的
-        // var_dump($_GET, $_SERVER);
+        // Можно проверить источник соединения через $_SERVER['HTTP_ORIGIN']
+        // и закрыть соединение, если источник не разрешен
     };
+
+    // Обработчик сообщений от клиента
     $connection->onMessage = function ($client_id, $message) {
         Server::log($message);
-        // echo $message;
-        // Log::debug($message);
-        // throw new Exception($message);
-        // Client::sendToClient($client_id, "Возвращаю \"$message\"");
     };
 };
 
+// Обработчик сообщений от клиентов
 $gateway->onMessage = function ($client_id, $message) {
-        Server::log(print_r($message, true));
-    // echo $message;
-    // Log::debug($message);
-    // throw new Exception($message);
-    // Client::sendToClient($client_id, "Возвращаю \"$message\"");
+    Server::log(print_r($message, true));
 };
 
 if (!defined('GLOBAL_START')) {
     Server::runAll();
-    // Server::log('fff');
-
 }

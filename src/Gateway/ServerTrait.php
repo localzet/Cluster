@@ -21,7 +21,7 @@ trait ServerTrait
         $gateway_data['body'] = $body;
         $gateway_data['ext_data'] = $connection->session;
         if ($this->_serverConnections) {
-            // 调用路由函数，选择一个server把请求转发给它
+            // Вызов функции маршрутизации для выбора Business Worker
             /** @var TcpConnection $server_connection */
             $server_connection = call_user_func($this->router, $this->_serverConnections, $connection, $cmd, $body);
             if (false === $server_connection->send($gateway_data)) {
@@ -29,10 +29,11 @@ trait ServerTrait
                 static::log($msg);
                 return false;
             }
-        } // 没有可用的 server
+        }
+        // Если нет доступных Business Worker
         else {
-            // gateway 启动后 1-2 秒内 SendBufferToServer fail 是正常现象，因为与 server 的连接还没建立起来，
-            // 所以不记录日志，只是关闭连接
+            // В первые 1-2 секунды после запуска ошибки отправки нормальны (соединения еще не установлены)
+            // Логируем только после истечения времени
             $time_diff = 2;
             if (time() - $this->_startTime >= $time_diff) {
                 $msg = 'SendBufferToServer fail. The connections between Gateway and Business are not ready. See http://doc2.workerman.net/send-buffer-to-worker-fail.html';
