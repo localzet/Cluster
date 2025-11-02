@@ -15,6 +15,8 @@ $worker->name = 'ChatBusinessWorker';
 $worker->count = 4;
 // 服务注册地址
 $worker->registerAddress = '127.0.0.1:1236';
+$worker->secretKey = 'your-secret-key-here';
+$worker->eventHandler = 'Events';
 
 $worker->onMessage = function ($client_id, $message) {
     Server::log(print_r($message, true));
