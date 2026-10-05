@@ -1,5 +1,5 @@
 # Contributing to the Project
-[Документ на русском языке](.github/CONTRIBUTING_ru.md)
+[Документ на русском языке](CONTRIBUTING_ru.md)
 
 We welcome you to our project and thank you for your interest in our code!
 
@@ -32,3 +32,7 @@ Please ensure that your code adheres to our code style guide and all tests pass.
 If you have any questions, feel free to reach out to us through the GitHub issues system.
 
 Thank you for your contribution!
+
+## Validation
+
+Run `composer validate --strict`, `composer lint` and `composer test` before proposing changes. Keep protocol compatibility and add regression cases for behavior changes. Do not commit shared secrets or vendor dependencies.
