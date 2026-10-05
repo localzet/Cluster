@@ -27,5 +27,9 @@
         "psr-4": {
             "localzet\\Cluster\\": "src/"
         }
+    },
+    "scripts": {
+        "test": "php tests/regression.php",
+        "lint": "find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l"
     }
 }

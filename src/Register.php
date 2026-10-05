@@ -70,9 +70,7 @@ class Register extends Server
     {
         parent::__construct($socketName, $socketContext);
 
-        $this->secretKey ??= base64_encode(sha1(sprintf('%04x%04x%04x%04x%04x%04x%04x%04x',
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0x0fff) | 0x4000,
-            mt_rand(0, 0x3fff) | 0x8000, mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)), true));
+        $this->secretKey ??= bin2hex(random_bytes(32));
     }
 
     /**
@@ -110,53 +108,46 @@ class Register extends Server
      */
     public function onMessage(TcpConnection $connection, string $buffer): void
     {
-        // Удаляем таймер для закрытия соединения.
-        Timer::del($connection->timeout_timerid);
-
-        // Распаковываем данные из JSON.
-        $data = @json_decode($buffer, true);
-
-        if (empty($data['event'])) {
-            $error = "Невернный запрос для Регистратора. Информация о запросе (IP: " . $connection->getRemoteIp() . ", Буфер запроса: $buffer)";
-            Server::log($error);
-            $connection->close($error);
+        $data = json_decode($buffer, true);
+        if (!is_array($data) || !isset($data['event']) || !is_string($data['event'])) {
+            Server::log('Register: invalid request from ' . $connection->getRemoteIp());
+            $connection->close();
             return;
         }
 
         $event = $data['event'];
         $secret_key = $data['secret_key'] ?? '';
+        $registered = isset($this->_gatewayConnections[$connection->id]) || isset($this->_serverConnections[$connection->id]);
+        if (($event !== 'ping' || !$registered) && $this->secretKey && (!is_string($secret_key) || !hash_equals($this->secretKey, $secret_key))) {
+            $connection->close();
+            return;
+        }
 
         switch ($event) {
             case 'gateway_connect':
-                if (empty($data['address'])) {
+                if (!isset($data['address']) || !is_string($data['address']) || $data['address'] === '') {
                     Server::log("Регистратор: Адрес не найден от " . $connection->getRemoteIp());
                     $connection->close();
                     return;
                 }
 
-                if ($this->secretKey && $secret_key !== $this->secretKey) {
-                    Server::log("Регистратор: Ключ не соответствует от " . $connection->getRemoteIp());
-                    $connection->close();
-                    return;
+                if (isset($connection->timeout_timerid)) {
+                    Timer::del($connection->timeout_timerid);
                 }
-
                 $this->_gatewayConnections[$connection->id] = $data['address'];
                 $this->broadcastAddresses();
                 break;
             case 'server_connect':
-                if ($this->secretKey && $secret_key !== $this->secretKey) {
-                    Server::log("Регистратор: Ключ не соответствует от " . $connection->getRemoteIp());
-                    $connection->close();
-                    return;
+                if (isset($connection->timeout_timerid)) {
+                    Timer::del($connection->timeout_timerid);
                 }
-
                 $this->_serverConnections[$connection->id] = $connection;
                 $this->broadcastAddresses($connection);
                 break;
             case 'ping':
                 break;
             default:
-                Server::log("Регистратор: неизвестное событие: $event IP: " . $connection->getRemoteIp() . " Буфер: $buffer");
+                Server::log('Register: unknown event from ' . $connection->getRemoteIp());
                 $connection->close();
         }
     }
@@ -168,6 +159,10 @@ class Register extends Server
      */
     public function onClose(TcpConnection $connection): void
     {
+        if (isset($connection->timeout_timerid)) {
+            Timer::del($connection->timeout_timerid);
+        }
+
         // Удаляем соединение со списков серверов.
         if (isset($this->_serverConnections[$connection->id])) {
             unset($this->_serverConnections[$connection->id]);
@@ -185,14 +180,14 @@ class Register extends Server
      *
      * @param TcpConnection|null $connection Соединение, для которого отправляется сообщение.
      */
-    public function broadcastAddresses(TcpConnection $connection = null): void
+    public function broadcastAddresses(?TcpConnection $connection = null): void
     {
         $data = [
             'event' => 'broadcast_addresses',
             'addresses' => array_unique(array_values($this->_gatewayConnections)),
         ];
 
-        foreach ($connection ? (array)$connection : $this->_serverConnections as $connection) {
+        foreach ($connection ? [$connection] : $this->_serverConnections as $connection) {
             $connection->send(json_encode($data));
         }
     }

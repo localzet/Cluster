@@ -459,8 +459,8 @@ class Gateway extends Server
             // Подключение Business Worker к Gateway
             case Cluster::CMD_SERVER_CONNECT:
                 $server_info = json_decode($data['body'], true);
-                if (!isset($server_info['secret_key']) || $server_info['secret_key'] !== $this->secretKey) {
-                    self::log("Gateway: Server key does not match or missing. Expected: " . var_export($this->secretKey, true));
+                if (!isset($server_info['secret_key']) || !is_string($server_info['secret_key']) || $this->secretKey === null || !hash_equals($this->secretKey, $server_info['secret_key'])) {
+                    self::log('Gateway: Server authentication failed.');
                     $connection->close();
                     return;
                 }
@@ -481,8 +481,8 @@ class Gateway extends Server
             // Подключение Gateway Client к Gateway
             case Cluster::CMD_GATEWAY_CLIENT_CONNECT:
                 $server_info = json_decode($data['body'], true);
-                if (!isset($server_info['secret_key']) || $server_info['secret_key'] !== $this->secretKey) {
-                    self::log("Gateway: GatewayClient key does not match or missing. Expected: " . var_export($this->secretKey, true));
+                if (!isset($server_info['secret_key']) || !is_string($server_info['secret_key']) || $this->secretKey === null || !hash_equals($this->secretKey, $server_info['secret_key'])) {
+                    self::log('Gateway: GatewayClient authentication failed.');
                     $connection->close();
                     return;
                 }
@@ -952,10 +952,10 @@ class Gateway extends Server
      * Log.
      * @param string $msg
      */
-    public static function log($msg): void
+    public static function log(mixed $msg, bool $decorated = true): void
     {
-        Timer::add(1, function () use ($msg) {
-            Server::log($msg);
+        Timer::add(1, function () use ($msg, $decorated) {
+            Server::log($msg, $decorated);
         }, null, false);
     }
 }
