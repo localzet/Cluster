@@ -1,4 +1,27 @@
 <?php
+/**
+ * @package     Localzet Cluster
+ * @link        https://github.com/localzet/Cluster
+ *
+ * @author      Ivan Zorin <creator@localzet.com>
+ * @copyright   Copyright © 2016-2026 Localzet Group. All rights reserved.
+ * @license     https://www.gnu.org/licenses/agpl-3.0 GNU Affero General Public License v3.0
+ *
+ *              This program is free software: you can redistribute it and/or modify
+ *              it under the terms of the GNU Affero General Public License as published
+ *              by the Free Software Foundation, either version 3 of the License, or
+ *              (at your option) any later version.
+ *
+ *              This program is distributed in the hope that it will be useful,
+ *              but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *              MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *              GNU Affero General Public License for more details.
+ *
+ *              You should have received a copy of the GNU Affero General Public License
+ *              along with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ *              For any questions, please contact <creator@localzet.com>
+*/
 
 namespace localzet\Cluster\Gateway;
 
@@ -25,7 +48,7 @@ trait ServerTrait
             /** @var TcpConnection $server_connection */
             $server_connection = call_user_func($this->router, $this->_serverConnections, $connection, $cmd, $body);
             if (false === $server_connection->send($gateway_data)) {
-                $msg = "SendBufferToServer fail. May be the send buffer are overflow. See http://doc2.workerman.net/send-buffer-overflow.html";
+                $msg = 'SendBufferToServer failed: the send buffer may have overflowed.';
                 static::log($msg);
                 return false;
             }
@@ -36,7 +59,7 @@ trait ServerTrait
             // Логируем только после истечения времени
             $time_diff = 2;
             if (time() - $this->_startTime >= $time_diff) {
-                $msg = 'SendBufferToServer fail. The connections between Gateway and Business are not ready. See http://doc2.workerman.net/send-buffer-to-worker-fail.html';
+                $msg = 'SendBufferToServer failed: no Business Worker connection is ready.';
                 static::log($msg);
             }
             $connection->destroy();
