@@ -106,7 +106,7 @@ class Context
      */
     public static function sessionDecode($session_buffer)
     {
-        return unserialize($session_buffer);
+        return unserialize($session_buffer, ['allowed_classes' => \localzet\Cluster\Protocols\Cluster::$allowObjectSerialization]);
     }
 
     /**

@@ -7,13 +7,16 @@ Gateway/Business Worker clustering for Localzet Server: gateways own client conn
 ## Compatibility
 
 - PHP 8.2 or later; Unix multi-process operation needs `pcntl` and `posix`.
-- The current dependency is `localzet/server:^4.2` (tested locally with 4.5.3).
-- This release targets Server 4.2 and later within the declared `^4.2` constraint.
+- Current source and the upcoming release require `localzet/server:^7.0`.
+- PHP 8.2 or later; Unix multi-process operation needs `pcntl` and `posix`.
 
 ## Install
 
+The package is not currently registered on Packagist. Add its Git repository and install the stable release:
+
 ```sh
-composer require localzet/cluster
+composer config repositories.localzet-cluster vcs https://github.com/localzet/Cluster
+composer require localzet/cluster:^1.0
 ```
 
 For this repository's examples and regression tests:
@@ -45,7 +48,11 @@ composer lint
 composer test
 ```
 
-The regression suite uses local socket pairs to check discovery broadcasts, class compatibility, authentication rejection and secret redaction. It does not establish distributed failover, load capacity or Server 7.x compatibility. CI resolves dependencies independently on PHP 8.2–8.5.
+The regression suite uses local socket pairs to check discovery broadcasts, class compatibility, authentication rejection and secret redaction against Server 7. CI resolves dependencies independently on PHP 8.2–8.5. It does not establish multi-host failover or production capacity.
+
+### User object deserialization
+
+Cluster encodes message bodies and sessions with PHP `serialize()`. Incoming PHP classes are not instantiated by `unserialize()` by default; arrays and scalar values remain supported, while serialized application objects decode as `__PHP_Incomplete_Class`. If the cluster is isolated, all nodes are trusted, and application sessions require objects, set `localzet\Cluster\Protocols\Cluster::$allowObjectSerialization` to `true` on every node. Do not enable this for untrusted peers.
 
 ## Documentation and contributing
 

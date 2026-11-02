@@ -31,6 +31,7 @@ require dirname(__DIR__) . '/vendor/autoload.php';
 use localzet\Cluster\Business;
 use localzet\Cluster\Client;
 use localzet\Cluster\Gateway;
+use localzet\Cluster\Lib\Context;
 use localzet\Cluster\Protocols\Cluster;
 use localzet\Cluster\Register;
 use localzet\Server;
@@ -45,6 +46,16 @@ final class TestGateway extends Gateway
     public static function log(mixed $msg, bool $decorated = true): void
     {
         self::$messages[] = (string) $msg;
+    }
+}
+
+final class WakeupProbe
+{
+    public static bool $wokeUp = false;
+
+    public function __wakeup(): void
+    {
+        self::$wokeUp = true;
     }
 }
 
@@ -80,6 +91,16 @@ try {
     foreach ([Register::class, Gateway::class, Business::class, Client::class] as $class) {
         check(class_exists($class), "$class loads with the supported Server dependency");
     }
+    $safePayload = Cluster::decode(Cluster::encode(array_replace(Cluster::$empty, ['cmd' => 1, 'body' => ['value' => 'ok']])));
+    check($safePayload['body'] === ['value' => 'ok'], 'Serialized array protocol payload remains supported');
+    $objectPayload = Cluster::decode(Cluster::encode(array_replace(Cluster::$empty, ['cmd' => 1, 'body' => new WakeupProbe()])));
+    check(!$objectPayload['body'] instanceof WakeupProbe && !WakeupProbe::$wokeUp, 'Untrusted object payloads are not instantiated by default');
+    Cluster::$allowObjectSerialization = true;
+    $trustedPayload = Cluster::decode(Cluster::encode(array_replace(Cluster::$empty, ['cmd' => 1, 'body' => new WakeupProbe()])));
+    check($trustedPayload['body'] instanceof WakeupProbe && WakeupProbe::$wokeUp, 'Trusted networks may opt into legacy object payloads');
+    Cluster::$allowObjectSerialization = false;
+    check(Context::sessionDecode(serialize(['user' => 7])) === ['user' => 7], 'Serialized array session remains supported');
+    check(!Context::sessionDecode(serialize(new WakeupProbe())) instanceof WakeupProbe, 'Session object payloads are blocked by default');
     $register = new Register('text://127.0.0.1:0', [], $secret);
     [$worker, $workerPeer] = connection($loop);
     $register->onConnect($worker);
