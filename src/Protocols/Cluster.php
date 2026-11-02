@@ -48,6 +48,8 @@ namespace localzet\Cluster\Protocols;
  */
 class Cluster
 {
+    /** Enable PHP object deserialization only for trusted cluster peers. */
+    public static bool $allowObjectSerialization = false;
     /** Для Server: Новое соединение */
     const CMD_ON_CONNECT = 1;
 
@@ -216,16 +218,21 @@ class Cluster
             if ($data['flag'] & self::FLAG_BODY_IS_SCALAR) {
                 $data['body'] = substr($buffer, self::HEAD_LEN + $data['ext_len']);
             } else {
-                $data['body'] = unserialize(substr($buffer, self::HEAD_LEN + $data['ext_len']));
+                $data['body'] = self::decodeSerializedBody(substr($buffer, self::HEAD_LEN + $data['ext_len']));
             }
         } else {
             $data['ext_data'] = '';
             if ($data['flag'] & self::FLAG_BODY_IS_SCALAR) {
                 $data['body'] = substr($buffer, self::HEAD_LEN);
             } else {
-                $data['body'] = unserialize(substr($buffer, self::HEAD_LEN));
+                $data['body'] = self::decodeSerializedBody(substr($buffer, self::HEAD_LEN));
             }
         }
         return $data;
+    }
+
+    private static function decodeSerializedBody(string $body): mixed
+    {
+        return unserialize($body, ['allowed_classes' => self::$allowObjectSerialization]);
     }
 }

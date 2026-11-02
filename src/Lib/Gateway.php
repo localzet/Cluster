@@ -796,7 +796,7 @@ class Gateway
         foreach ($receive_buffer_array as $socket_id => $buffer) {
             $local_ip                                    = ip2long($client_address_map[$socket_id][0]);
             $local_port                                  = $client_address_map[$socket_id][1];
-            $format_buffer_array[$local_ip][$local_port] = unserialize(substr($buffer, 4));
+            $format_buffer_array[$local_ip][$local_port] = unserialize(substr($buffer, 4), ['allowed_classes' => Cluster::$allowObjectSerialization]);
         }
         return $format_buffer_array;
     }
@@ -1189,7 +1189,7 @@ class Gateway
                 }
             }
             // 返回结果
-            return unserialize(substr($all_buffer, 4));
+            return unserialize(substr($all_buffer, 4), ['allowed_classes' => Cluster::$allowObjectSerialization]);
         } else {
             throw new Exception("Ошибка sendAndRecv($address, \$bufer)! Не могу отправить данные!", 502);
         }

@@ -870,7 +870,8 @@ class Client
             $local_ip = ip2long($client_address_map[$socket_id][0]);
             $local_port = $client_address_map[$socket_id][1];
             $format_buffer_array[$local_ip][$local_port] = unserialize(
-                substr($buffer, 4)
+                substr($buffer, 4),
+                ['allowed_classes' => Cluster::$allowObjectSerialization]
             );
         }
         return $format_buffer_array;
@@ -1349,7 +1350,7 @@ class Client
                 }
             }
             // 返回结果
-            return unserialize(substr($all_buffer, 4));
+            return unserialize(substr($all_buffer, 4), ['allowed_classes' => Cluster::$allowObjectSerialization]);
         } else {
             throw new \Exception(
                 "MultiClient::sendAndRecv($address, \$bufer) Не может отправить даные!",
