@@ -7,8 +7,7 @@ Gateway/Business Worker clustering for Localzet Server: gateways own client conn
 ## Compatibility
 
 - PHP 8.2 or later; Unix multi-process operation needs `pcntl` and `posix`.
-- Current source and the upcoming release require `localzet/server:^7.0`.
-- PHP 8.2 or later; Unix multi-process operation needs `pcntl` and `posix`.
+- Release `v1.0.0` requires `localzet/server:^7.0`.
 
 ## Install
 
