@@ -33,10 +33,13 @@ use localzet\Cluster\Client;
 use localzet\Cluster\Gateway;
 use localzet\Cluster\Lib\Context;
 use localzet\Cluster\Protocols\Cluster;
+use localzet\Cluster\Protocols\Federation;
 use localzet\Cluster\Register;
 use localzet\Server;
+use localzet\Server\Connection\AsyncTcpConnection;
 use localzet\Server\Connection\TcpConnection;
 use localzet\Server\Events\EventInterface;
+use localzet\Server\Protocols\ProtocolInterface;
 use localzet\Timer;
 
 final class TestGateway extends Gateway
@@ -91,6 +94,7 @@ try {
     foreach ([Register::class, Gateway::class, Business::class, Client::class] as $class) {
         check(class_exists($class), "$class loads with the supported Server dependency");
     }
+    check(is_a(Federation::class, ProtocolInterface::class, true), 'Federation implements the Server 7 protocol contract');
     $safePayload = Cluster::decode(Cluster::encode(array_replace(Cluster::$empty, ['cmd' => 1, 'body' => ['value' => 'ok']])));
     check($safePayload['body'] === ['value' => 'ok'], 'Serialized array protocol payload remains supported');
     $objectPayload = Cluster::decode(Cluster::encode(array_replace(Cluster::$empty, ['cmd' => 1, 'body' => new WakeupProbe()])));
@@ -147,6 +151,49 @@ try {
     fclose($workerPeer);
     fclose($gatewayPeer);
     Timer::delAll();
+
+    $networkLoop = Server::getEventLoop();
+    $federationServer = new Server('Federation://127.0.0.1:0');
+    $federationServer->onMessage = static function (TcpConnection $connection, array $data) use (&$received, $networkLoop): void {
+        $received = $data;
+        $connection->close();
+        $networkLoop->stop();
+    };
+    $federationServer->listen();
+
+    $socketName = stream_socket_get_name($federationServer->getMainSocket(), false);
+    if (!is_string($socketName)) {
+        throw new RuntimeException('Cannot read Federation listener address.');
+    }
+
+    $payload = array_replace(Cluster::$empty, ['cmd' => Cluster::CMD_PING, 'body' => 'server7-adapter']);
+    $received = null;
+    $connectError = null;
+    $timedOut = false;
+    $client = new AsyncTcpConnection('Federation://' . $socketName, [], $networkLoop);
+    $client->onConnect = static function (AsyncTcpConnection $connection) use ($payload): void {
+        $connection->send($payload);
+    };
+    $client->onError = static function (...$arguments) use (&$connectError, $networkLoop): void {
+        $connectError = (string)($arguments[2] ?? 'Federation connection failed.');
+        $networkLoop->stop();
+    };
+    $timeoutId = $networkLoop->delay(2, static function () use (&$timedOut, $networkLoop): void {
+        $timedOut = true;
+        $networkLoop->stop();
+    });
+
+    try {
+        $client->connect();
+        $networkLoop->run();
+    } finally {
+        $networkLoop->offDelay($timeoutId);
+        $client->close();
+        $federationServer->unlisten();
+    }
+
+    check(!$timedOut && $connectError === null, 'Federation custom scheme connects to the Server 7 listener');
+    check(is_array($received) && $received['body'] === 'server7-adapter', 'Federation adapter decodes the Cluster wire payload');
 } finally {
     @unlink($log);
 }

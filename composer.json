@@ -24,6 +24,9 @@
         "localzet/server": "^7.0"
     },
     "autoload": {
+        "files": [
+            "src/register_server_protocol.php"
+        ],
         "psr-4": {
             "localzet\\Cluster\\": "src/"
         }
